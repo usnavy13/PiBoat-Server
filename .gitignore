@@ -59,4 +59,28 @@ Thumbs.db
 # Temporary files
 tmp/
 .tmp/
-temp/ 
+temp/
+
+# Ignore large files
+examples/simulated_device/simulated_video.mp4
+
+# Media files
+*.mp4
+*.mov
+*.avi
+*.wmv
+*.flv
+*.mkv
+*.webm
+
+# Large data files
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+*.iso
+
+# OS specific files
+.DS_Store
+Thumbs.db 
