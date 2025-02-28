@@ -1,14 +1,36 @@
-websockets
+# PiBoat Server Requirements
+
+# Web framework
 fastapi
 uvicorn
+
+# WebSocket and WebRTC
+websockets
 aiortc
-aiohttp
+
+# JSON handling
 ujson
+
+# Data validation
 pydantic
+pydantic-settings
+
+# Configuration
 python-dotenv
+
+# Utilities
+aiohttp
+numpy
+
+# Templates
+jinja2
+
+# Form handling
+python-multipart
+
+# Computer vision (optional)
+opencv-python
+
+# Testing
 pytest
 pytest-asyncio
-numpy>=1.19.0
-jinja2
-python-multipart
-opencv-python>=4.5.0
