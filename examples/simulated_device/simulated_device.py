@@ -36,7 +36,7 @@ logger.info(f"websockets version: {pkg_resources.get_distribution('websockets').
 
 # Configuration
 WS_SERVER_URL = "ws://localhost:8000/ws/device/{device_id}"
-DEVICE_ID = f"simulated-boat-{uuid.uuid4().hex[:8]}"
+DEVICE_ID = f"simulated-boat-1"
 TELEMETRY_INTERVAL = 1.0  # Send telemetry every 1 second
 
 
@@ -272,11 +272,18 @@ class SimulatedDevice:
                         "battery": {
                             "percentage": self.battery,
                             "voltage": 12.0 + (self.battery - 50) * 0.04,  # Simulate voltage drop
-                            "current": 2.0 + random.random()  # Simulate current draw
+                            "current": 2.0 + random.random(),  # Simulate current draw
+                            "level": self.battery  # Add level field for web client
                         },
-                        "environmental": {
+                        "system": {
+                            "cpu_temp": 45.0 + random.random() * 15,  # 45-60°C
+                            "signal_strength": -50 - random.random() * 30  # -50 to -80 dBm
+                        },
+                        "environment": {
                             "water_temp": 15.0 + random.random() * 5,  # 15-20°C
                             "air_temp": 20.0 + random.random() * 10,  # 20-30°C
+                            "air_pressure": 1013.0 + (random.random() - 0.5) * 10,  # 1008-1018 hPa
+                            "humidity": 60.0 + random.random() * 20,  # 60-80%
                             "water_depth": 15.0 + random.random() * 2,  # 15-17m
                             "wind_speed": 5.0 + random.random() * 5,  # 5-10 knots
                             "wind_direction": (self.heading + 180 + (random.random() - 0.5) * 45) % 360  # Roughly opposite to heading with some variation

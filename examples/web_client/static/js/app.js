@@ -17,8 +17,17 @@ class PiBoatClient {
         this.videoStream = null;
         this.logToServer = true; // Whether to send logs to the server
         
+        // Map related properties
+        this.map = null;
+        this.boatMarker = null;
+        this.boatPath = null;
+        this.previousPositions = []; // Array of [lat, lng]
+        this.positionData = []; // Array of {position: [lat, lng], timestamp: Date, heading: number}
+        this.hasInitialPosition = false;
+        
         // Initialize the application
         this.initEventListeners();
+        this.initMap();
         this.consoleLog('Client initialized', 'info');
     }
     
@@ -40,6 +49,215 @@ class PiBoatClient {
         
         // Console
         document.getElementById('clear-console-btn').addEventListener('click', () => this.clearConsole());
+        
+        // Map resizing
+        window.addEventListener('resize', () => this.handleMapResize());
+    }
+    
+    // Initialize the map
+    initMap() {
+        try {
+            // Create map centered at a default location (will be updated when GPS data arrives)
+            this.map = L.map('boat-map').setView([0, 0], 2);
+            
+            // Add OpenStreetMap tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 19
+            }).addTo(this.map);
+            
+            // Create boat icon
+            const boatIcon = L.icon({
+                iconUrl: '/static/img/boat-icon.svg',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
+                popupAnchor: [0, -16]
+            });
+            
+            // Create marker for the boat (will be positioned when GPS data arrives)
+            this.boatMarker = L.marker([0, 0], {
+                icon: boatIcon,
+                title: 'PiBoat'
+            });
+            
+            // Create empty feature group for boat path
+            this.boatPath = L.featureGroup().addTo(this.map);
+            
+            // Add map controls
+            L.control.scale().addTo(this.map);
+            
+            // Add custom control for clearing the path
+            const clearPathControl = L.control({position: 'topright'});
+            clearPathControl.onAdd = (map) => {
+                const div = L.DomUtil.create('div', 'custom-map-control');
+                div.innerHTML = '<button class="secondary-btn" title="Clear Path">Clear Path</button>';
+                div.onclick = () => this.clearBoatPath();
+                return div;
+            };
+            clearPathControl.addTo(this.map);
+            
+            this.consoleLog('Map initialized', 'info');
+        } catch (error) {
+            this.consoleLog(`Error initializing map: ${error.message}`, 'error');
+        }
+    }
+    
+    // Update boat position on map
+    updateBoatPosition(latitude, longitude, heading) {
+        if (!this.map || !this.boatMarker || !latitude || !longitude) return;
+        
+        try {
+            const position = [latitude, longitude];
+            const timestamp = new Date();
+            
+            // Store position with timestamp and heading
+            this.positionData.push({
+                position: position,
+                timestamp: timestamp,
+                heading: heading
+            });
+            
+            // Limit the number of positions stored to prevent memory issues
+            if (this.positionData.length > 1000) {
+                this.positionData.shift();
+            }
+            
+            // Update path with just the positions
+            this.previousPositions = this.positionData.map(data => data.position);
+            
+            // Add the boat marker to the map if not added yet
+            if (!this.hasInitialPosition) {
+                this.boatMarker.setLatLng(position);
+                this.boatMarker.addTo(this.map);
+                this.map.setView(position, 15); // Zoom to boat position
+                this.hasInitialPosition = true;
+                
+                // Add popup with boat info
+                this.boatMarker.bindPopup(this.createBoatPopupContent(latitude, longitude, heading, timestamp));
+            } else {
+                // Update marker position
+                this.boatMarker.setLatLng(position);
+                
+                // Update popup content
+                const popup = this.boatMarker.getPopup();
+                if (popup) {
+                    popup.setContent(this.createBoatPopupContent(latitude, longitude, heading, timestamp));
+                }
+                
+                // Auto-pan the map if the marker is near the edge
+                if (this.map.getBounds().contains(position)) {
+                    // If marker is visible, don't change the view
+                } else {
+                    this.map.setView(position, this.map.getZoom());
+                }
+            }
+            
+            // Use gradient coloring for path to show recency
+            if (this.positionData.length > 1) {
+                // Remove old path
+                if (this.boatPath) {
+                    this.boatPath.remove();
+                }
+                
+                // Create a new gradient path by using multiple polylines
+                const segments = this.createGradientPath();
+                this.boatPath = L.featureGroup(segments).addTo(this.map);
+                
+                // Add click handler to the new path
+                this.boatPath.on('click', (e) => {
+                    // Find the closest point in our data to where user clicked
+                    const clickedPoint = e.latlng;
+                    let closestIdx = 0;
+                    let closestDistance = Infinity;
+                    
+                    this.positionData.forEach((data, index) => {
+                        const point = L.latLng(data.position[0], data.position[1]);
+                        const distance = clickedPoint.distanceTo(point);
+                        if (distance < closestDistance) {
+                            closestDistance = distance;
+                            closestIdx = index;
+                        }
+                    });
+                    
+                    // Show popup with info about this point
+                    const data = this.positionData[closestIdx];
+                    const content = this.createPathPointPopupContent(data);
+                    
+                    L.popup()
+                        .setLatLng(data.position)
+                        .setContent(content)
+                        .openOn(this.map);
+                });
+            } else if (this.boatPath) {
+                // Just one point, update the existing path
+                this.boatPath.setLatLngs(this.previousPositions);
+            }
+            
+            // Rotate marker based on heading if available
+            if (heading !== undefined && heading !== null) {
+                // This requires a custom marker with CSS rotation
+                // For simplicity, we're just updating the popup text
+            }
+        } catch (error) {
+            this.consoleLog(`Error updating boat position: ${error.message}`, 'error');
+        }
+    }
+    
+    // Create a gradient-colored path from old (blue) to recent (red)
+    createGradientPath() {
+        const segments = [];
+        
+        if (this.positionData.length < 2) {
+            return segments;
+        }
+        
+        // Create segments with colors based on recency
+        for (let i = 0; i < this.positionData.length - 1; i++) {
+            const ratio = i / (this.positionData.length - 1);
+            
+            // Color varies from blue (oldest) to red (newest)
+            const r = Math.floor(255 * (1 - ratio));
+            const g = 0;
+            const b = Math.floor(255 * ratio);
+            
+            const color = `rgb(${r}, ${g}, ${b})`;
+            
+            const segment = L.polyline(
+                [this.positionData[i].position, this.positionData[i+1].position],
+                {
+                    color: color,
+                    weight: 3,
+                    opacity: 0.7
+                }
+            );
+            
+            segments.push(segment);
+        }
+        
+        return segments;
+    }
+    
+    // Create popup content for boat marker
+    createBoatPopupContent(latitude, longitude, heading, timestamp) {
+        return `
+            <strong>PiBoat</strong><br>
+            Latitude: ${latitude.toFixed(6)}<br>
+            Longitude: ${longitude.toFixed(6)}<br>
+            Heading: ${heading || '--'}°<br>
+            Time: ${timestamp.toLocaleTimeString()}
+        `;
+    }
+    
+    // Create popup content for path points
+    createPathPointPopupContent(data) {
+        return `
+            <strong>Historical Position</strong><br>
+            Latitude: ${data.position[0].toFixed(6)}<br>
+            Longitude: ${data.position[1].toFixed(6)}<br>
+            Heading: ${data.heading || '--'}°<br>
+            Time: ${data.timestamp.toLocaleTimeString()}<br>
+            Date: ${data.timestamp.toLocaleDateString()}
+        `;
     }
     
     // Toggle connection (connect/disconnect)
@@ -268,6 +486,14 @@ class PiBoatClient {
         
         // Update UI with telemetry data
         this.updateTelemetryUI();
+        
+        // Update map if GPS data is available
+        if (telemetryType === 'sensor_data' && data.data && data.data.gps) {
+            const gps = data.data.gps;
+            if (gps.latitude && gps.longitude) {
+                this.updateBoatPosition(gps.latitude, gps.longitude, gps.heading);
+            }
+        }
     }
     
     // Handle command status message
@@ -794,6 +1020,25 @@ class PiBoatClient {
     // Clear console
     clearConsole() {
         document.getElementById('console-output').innerHTML = '';
+    }
+    
+    // Clear the boat path history
+    clearBoatPath() {
+        this.previousPositions = [];
+        this.positionData = [];
+        if (this.boatPath) {
+            this.boatPath.clearLayers();
+            this.consoleLog('Boat path cleared', 'info');
+        }
+    }
+    
+    // Handle window resize to update map
+    handleMapResize() {
+        if (this.map) {
+            // Need to call invalidateSize when the map container size changes
+            this.map.invalidateSize();
+            this.consoleLog('Map resized', 'info');
+        }
     }
 }
 

@@ -310,6 +310,40 @@ button:disabled {
     padding: 0.2rem 0;
 }
 
+/* Map Container */
+.map-container {
+    background-color: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    padding: 1rem;
+    margin-top: 1rem;
+}
+
+.map-container h2 {
+    margin-bottom: 0.75rem;
+}
+
+#boat-map {
+    height: 300px;
+    width: 100%;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--gray-300);
+}
+
+/* Custom Map Controls */
+.custom-map-control {
+    background-color: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    padding: 5px;
+}
+
+.custom-map-control button {
+    padding: 4px 8px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
 /* Console */
 .console-container {
     grid-area: console;

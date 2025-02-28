@@ -38,7 +38,8 @@ ENV/
 # Logs
 logs/
 *.log
-
+*command_log.json
+examples/simulated_device/command_log.json
 # Environment variables
 .env
 .env.local

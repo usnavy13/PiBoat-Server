@@ -94,6 +94,19 @@ async def device_websocket_endpoint(websocket: WebSocket, device_id: str):
                 # Update last activity time to prevent timeout
                 if device_id in connection_manager.device_connections:
                     connection_manager.device_connections[device_id].last_activity = time.time()
+            elif message_type == "command_ack":
+                # Handle command acknowledgement from device
+                await command_handler.handle_command_acknowledgement(device_id, data, connection_manager)
+            elif message_type == "status_response":
+                # Handle status response from device - forward to paired client
+                client_id = connection_manager.device_to_client_mapping.get(device_id)
+                if client_id:
+                    # Add deviceId field if not present
+                    if "deviceId" not in data:
+                        data["deviceId"] = device_id
+                    await connection_manager.send_to_client(client_id, data)
+                else:
+                    logger.warning(f"Received status response from device {device_id} but no paired client")
             else:
                 logger.warning(f"Unknown message type from device {device_id}: {message_type}")
                 
