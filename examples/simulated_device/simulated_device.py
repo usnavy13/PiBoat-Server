@@ -40,11 +40,11 @@ DEVICE_ID = f"simulated-boat-{uuid.uuid4().hex[:8]}"
 TELEMETRY_INTERVAL = 1.0  # Send telemetry every 1 second
 
 
-class FileVideoStreamTrack(VideoStreamTrack):
+class TestPatternVideoTrack(VideoStreamTrack):
     """
-    A video track that reads from a video file or displays a simple color pattern if no file is provided.
+    A video track that displays a simple color pattern.
     """
-    def __init__(self, file_path=None):
+    def __init__(self):
         super().__init__()
         self._counter = 0
         self._fps = 30
@@ -58,27 +58,11 @@ class FileVideoStreamTrack(VideoStreamTrack):
         self._supported_codecs = ["VP8", "H264"]
         logger.info(f"Video track initialized with supported codecs: {', '.join(self._supported_codecs)}")
         
-        # If a video file is provided, open it for reading
-        self.file_path = file_path
-        self.cap = None
-        if file_path and os.path.exists(file_path):
-            self.cap = cv2.VideoCapture(file_path)
-            if self.cap.isOpened():
-                self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                self._fps = self.cap.get(cv2.CAP_PROP_FPS)
-                if self._fps <= 0:
-                    self._fps = 30  # Default if FPS cannot be determined
-                logger.info(f"Opened video file {file_path} with {self.width}x{self.height} resolution at {self._fps}fps")
-            else:
-                logger.error(f"Failed to open video file {file_path}")
-                self.cap = None
-        else:
-            logger.info(f"No video file provided or file doesn't exist, using test pattern")
-        
         # Set up a simple static image for fallback
         self._static_image = numpy.zeros((self.height, self.width, 3), dtype=numpy.uint8)
         self._static_image[:, :, 0] = 255  # Make it red for easy identification
+        
+        logger.info(f"Using test pattern video stream with {self.width}x{self.height} resolution at {self._fps}fps")
         
     def get_codec_compatibility(self, remote_sdp):
         """
@@ -130,38 +114,8 @@ class FileVideoStreamTrack(VideoStreamTrack):
         pts, time_base = await self._next_timestamp()
         
         try:
-            # Try to read from video file if available
-            if self.cap and self.cap.isOpened():
-                ret, frame = self.cap.read()
-                if not ret:
-                    # If we've reached the end of the file, start over
-                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    ret, frame = self.cap.read()
-                    if not ret:
-                        # If still can't read, fall back to pattern
-                        logger.warning("Failed to read from video file, using fallback pattern")
-                        return await self._create_pattern_frame(pts, time_base)
-                
-                # Add timestamp to the frame
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cv2.putText(
-                    frame, 
-                    f"Simulated Boat - {timestamp}", 
-                    (20, 40), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    0.8, 
-                    (255, 255, 255), 
-                    2
-                )
-                
-                # Create VideoFrame from numpy array
-                video_frame = VideoFrame.from_ndarray(frame, format="bgr24")
-                video_frame.pts = pts
-                video_frame.time_base = time_base
-                return video_frame
-            else:
-                # If no video file is available, create a pattern
-                return await self._create_pattern_frame(pts, time_base)
+            # Create a test pattern
+            return await self._create_pattern_frame(pts, time_base)
                 
         except Exception as e:
             logger.error(f"Error in video frame generation: {e}")
@@ -172,7 +126,7 @@ class FileVideoStreamTrack(VideoStreamTrack):
             return frame
     
     async def _create_pattern_frame(self, pts, time_base):
-        """Create a simple color pattern as a fallback."""
+        """Create a simple color pattern."""
         # Create a simple color pattern
         img = numpy.zeros((self.height, self.width, 3), dtype=numpy.uint8)
         
@@ -213,26 +167,15 @@ class FileVideoStreamTrack(VideoStreamTrack):
         """Generate the next frame timestamp."""
         self._timestamp += int(90000 / self._fps)
         return self._timestamp, self._time_base
-    
-    def __del__(self):
-        """Clean up resources when object is destroyed."""
-        if self.cap and self.cap.isOpened():
-            self.cap.release()
-
-
-# Rename TestPatternVideoTrack to maintain compatibility with existing code
-TestPatternVideoTrack = FileVideoStreamTrack
-LoopedVideoStreamTrack = FileVideoStreamTrack
 
 class SimulatedDevice:
     """
     Simulated autonomous boat device that connects to the relay server,
     sends telemetry data, and streams video via WebRTC.
     """
-    def __init__(self, device_id, server_url, video_file=None):
+    def __init__(self, device_id, server_url):
         self.device_id = device_id
         self.server_url = server_url.format(device_id=device_id)
-        self.video_file = video_file
         self.websocket = None
         self.peer_connections = {}
         self.command_log = []
@@ -461,8 +404,8 @@ class SimulatedDevice:
             self.peer_connections[client_id] = pc
             logger.info(f"Created peer connection for client {client_id}")
             
-            # Set up the video track - use the video file if provided
-            video_track = FileVideoStreamTrack(self.video_file)
+            # Set up the video track - use the test pattern
+            video_track = TestPatternVideoTrack()
             pc.addTrack(video_track)
             logger.info(f"Initialized video stream with {video_track.width}x{video_track.height} resolution at {video_track._fps}fps")
             
@@ -512,7 +455,7 @@ class SimulatedDevice:
                 
             try:
                 # Check codec compatibility first
-                video_track = FileVideoStreamTrack(self.video_file)
+                video_track = TestPatternVideoTrack()
                 compatible, message = video_track.get_codec_compatibility(sdp)
                 logger.info(f"Codec compatibility check: {message}")
                 
@@ -609,8 +552,8 @@ class SimulatedDevice:
             self.peer_connections[client_id] = pc
             logger.info(f"Created peer connection for client {client_id}")
             
-            # Set up the video track - use the video file if provided
-            video_track = FileVideoStreamTrack(self.video_file)
+            # Set up the video track
+            video_track = TestPatternVideoTrack()
             pc.addTrack(video_track)
             logger.info(f"Initialized video stream with {video_track.width}x{video_track.height} resolution at {video_track._fps}fps")
             
@@ -790,21 +733,14 @@ class SimulatedDevice:
 
 
 async def main():
-    # Check if a video file is provided as an environment variable
-    video_file = os.environ.get("VIDEO_FILE")
-    
     # Create and run the simulated device
     device = SimulatedDevice(
         device_id=DEVICE_ID,
-        server_url=WS_SERVER_URL,
-        video_file=video_file
+        server_url=WS_SERVER_URL
     )
     
     logger.info(f"Starting simulated device: {DEVICE_ID}")
-    if video_file and os.path.exists(video_file):
-        logger.info(f"Using video file: {video_file}")
-    else:
-        logger.info(f"Using test pattern video stream")
+    logger.info(f"Using test pattern video stream")
     logger.info(f"WebSocket server: {WS_SERVER_URL.format(device_id=DEVICE_ID)}")
     
     try:
