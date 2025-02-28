@@ -1,0 +1,19 @@
+# PiBoat Web Client Requirements
+
+# Web framework
+fastapi
+uvicorn
+
+# Templating
+jinja2
+
+# WebSocket and WebRTC
+websockets
+aiortc
+
+# Form handling
+python-multipart
+
+# Utilities
+aiohttp
+python-dotenv

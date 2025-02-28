@@ -1,0 +1,7 @@
+websockets
+aiortc
+opencv-python
+aiohttp
+av # For video frame handling
+pathlib
+ujson

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PiBoat Control Client</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}">
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>PiBoat Control Client</h1>
+            <div class="connection-status">
+                <span id="connection-icon" class="icon disconnected"><i class="fas fa-plug"></i></span>
+                <span id="connection-text">Disconnected</span>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <div class="sidebar">
+                <div class="section">
+                    <h2>Connection</h2>
+                    <div class="form-group">
+                        <label for="client-id">Client ID:</label>
+                        <input type="text" id="client-id" value="{{ client_id }}" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="server-url">Server URL:</label>
+                        <input type="text" id="server-url" value="{{ relay_server }}">
+                    </div>
+                    <button id="connect-btn" class="primary-btn">Connect</button>
+                </div>
+
+                <div class="section">
+                    <h2>Devices</h2>
+                    <div class="device-list-container">
+                        <ul id="device-list" class="device-list">
+                            <li class="empty-message">No devices available</li>
+                        </ul>
+                    </div>
+                    <button id="refresh-devices-btn" class="secondary-btn" disabled>Refresh Devices</button>
+                </div>
+
+                <div class="section">
+                    <h2>Commands</h2>
+                    <div class="form-group">
+                        <label for="command-name">Command:</label>
+                        <select id="command-name" disabled>
+                            <option value="get_status">Get Status</option>
+                            <option value="set_waypoint">Set Waypoint</option>
+                            <option value="set_waypoints">Set Multiple Waypoints</option>
+                            <option value="stop">Stop</option>
+                            <option value="return_to_home">Return to Home</option>
+                            <option value="custom">Custom Command</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="command-data">Command Data (JSON):</label>
+                        <textarea id="command-data" rows="6" disabled>{}</textarea>
+                    </div>
+                    <button id="send-command-btn" class="primary-btn" disabled>Send Command</button>
+                </div>
+            </div>
+
+            <div class="content-area">
+                <div class="video-container">
+                    <video id="remote-video" autoplay playsinline poster="{{ url_for('static', path='/img/video-placeholder.svg') }}">
+                        <p>Your browser doesn't support HTML5 video</p>
+                    </video>
+                    <div class="video-overlay" id="video-status">No device connected</div>
+                    <div class="video-controls">
+                        <button id="start-video-btn" class="control-btn" disabled><i class="fas fa-play"></i> Start Video</button>
+                        <button id="stop-video-btn" class="control-btn" disabled><i class="fas fa-stop"></i> Stop Video</button>
+                    </div>
+                </div>
+
+                <div class="telemetry-container">
+                    <h2>Telemetry Data</h2>
+                    <div class="telemetry-panels">
+                        <div class="telemetry-panel">
+                            <h3>GPS</h3>
+                            <div class="telemetry-value" id="gps-lat">Latitude: --</div>
+                            <div class="telemetry-value" id="gps-lon">Longitude: --</div>
+                            <div class="telemetry-value" id="gps-heading">Heading: --</div>
+                            <div class="telemetry-value" id="gps-speed">Speed: --</div>
+                        </div>
+                        <div class="telemetry-panel">
+                            <h3>System</h3>
+                            <div class="telemetry-value" id="battery-level">Battery: --</div>
+                            <div class="telemetry-value" id="cpu-temp">CPU Temp: --</div>
+                            <div class="telemetry-value" id="signal-strength">Signal: --</div>
+                            <div class="telemetry-value" id="system-status">Status: --</div>
+                        </div>
+                        <div class="telemetry-panel">
+                            <h3>Environment</h3>
+                            <div class="telemetry-value" id="water-temp">Water Temp: --</div>
+                            <div class="telemetry-value" id="air-temp">Air Temp: --</div>
+                            <div class="telemetry-value" id="air-pressure">Pressure: --</div>
+                            <div class="telemetry-value" id="humidity">Humidity: --</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="console-container">
+            <div class="console-header">
+                <h2>Console</h2>
+                <div class="console-actions">
+                    <div class="log-info">
+                        <span id="log-file-info">Log file: {{ log_file }}</span>
+                        <a id="download-logs-btn" href="/api/download_log" target="_blank" class="secondary-btn">Download Logs</a>
+                    </div>
+                    <button id="clear-console-btn" class="secondary-btn">Clear</button>
+                </div>
+            </div>
+            <div id="console-output" class="console-output"></div>
+        </div>
+    </div>
+
+    <!-- Command templates (hidden) -->
+    <div id="command-templates" style="display: none;">
+        <div id="template-set_waypoint">
+            {
+  "latitude": 37.7749,
+  "longitude": -122.4194,
+  "mode": "autonomous"
+}
+        </div>
+        <div id="template-set_waypoints">
+            {
+  "waypoints": [
+    {
+      "latitude": 37.7749,
+      "longitude": -122.4194
+    },
+    {
+      "latitude": 37.7750,
+      "longitude": -122.4180
+    }
+  ],
+  "mode": "autonomous"
+}
+        </div>
+        <div id="template-get_status">
+            {}
+        </div>
+        <div id="template-stop">
+            {}
+        </div>
+        <div id="template-return_to_home">
+            {}
+        </div>
+        <div id="template-custom">
+            {
+  "param1": "value1",
+  "param2": "value2"
+}
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="{{ url_for('static', path='/js/app.js') }}"></script>
+</body>
+</html> 

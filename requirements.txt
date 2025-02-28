@@ -1,0 +1,13 @@
+websockets
+fastapi
+uvicorn
+aiortc
+aiohttp
+ujson
+pydantic
+python-dotenv
+pytest
+pytest-asyncio
+numpy
+jinja2
+python-multipart
