@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 import sys
+import time
 from typing import Dict, Set
 from contextlib import asynccontextmanager
 
@@ -89,6 +90,10 @@ async def device_websocket_endpoint(websocket: WebSocket, device_id: str):
                 await webrtc_handler.handle_device_message(device_id, data, connection_manager)
             elif message_type == "telemetry":
                 await telemetry_handler.process_telemetry(device_id, data, connection_manager)
+            elif message_type == "pong":
+                # Update last activity time to prevent timeout
+                if device_id in connection_manager.device_connections:
+                    connection_manager.device_connections[device_id].last_activity = time.time()
             else:
                 logger.warning(f"Unknown message type from device {device_id}: {message_type}")
                 
@@ -113,10 +118,20 @@ async def client_websocket_endpoint(websocket: WebSocket, client_id: str):
                 await connection_manager.send_devices_list(client_id)
                 continue
                 
+            if message_type == "pong":
+                # Update last activity time to prevent timeout
+                if client_id in connection_manager.client_connections:
+                    connection_manager.client_connections[client_id].last_activity = time.time()
+                continue
+                
             target_device_id = data.get("deviceId")
             
             if not target_device_id and message_type != "devices_list":
-                logger.warning(f"Client {client_id} sent message without deviceId")
+                logger.warning(f"Client {client_id} sent message without deviceId for message type: {message_type}")
+                await connection_manager.send_to_client(
+                    client_id,
+                    {"type": "error", "message": f"Missing deviceId for message type: {message_type}"}
+                )
                 continue
                 
             if message_type == "webrtc":

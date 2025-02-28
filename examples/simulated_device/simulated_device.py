@@ -9,11 +9,12 @@ import math
 from datetime import datetime
 from pathlib import Path
 import fractions
+import pkg_resources
 
 import aiohttp
 import websockets
 import cv2
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, RTCRtpSender
 from av import VideoFrame
 import numpy
 
@@ -28,49 +29,169 @@ logging.basicConfig(
 )
 logger = logging.getLogger("SimulatedDevice")
 
+# Log library versions for debugging
+logger.info(f"aiortc version: {pkg_resources.get_distribution('aiortc').version}")
+logger.info(f"av version: {pkg_resources.get_distribution('av').version}")
+logger.info(f"websockets version: {pkg_resources.get_distribution('websockets').version}")
+
 # Configuration
 WS_SERVER_URL = "ws://localhost:8000/ws/device/{device_id}"
 DEVICE_ID = f"simulated-boat-{uuid.uuid4().hex[:8]}"
 TELEMETRY_INTERVAL = 1.0  # Send telemetry every 1 second
 
 
-class TestPatternVideoTrack(VideoStreamTrack):
+class FileVideoStreamTrack(VideoStreamTrack):
     """
-    A video track that generates a moving test pattern.
+    A video track that reads from a video file or displays a simple color pattern if no file is provided.
     """
-    def __init__(self):
+    def __init__(self, file_path=None):
         super().__init__()
         self._counter = 0
         self._fps = 30
         self.width = 640
         self.height = 480
         self._timestamp = 0
-        logger.info(f"Initialized test pattern video stream with {self.width}x{self.height} resolution at {self._fps}fps")
+        self.kind = "video"
+        self._time_base = fractions.Fraction(1, 90000)
+        
+        # Define supported codecs to ensure compatibility
+        self._supported_codecs = ["VP8", "H264"]
+        logger.info(f"Video track initialized with supported codecs: {', '.join(self._supported_codecs)}")
+        
+        # If a video file is provided, open it for reading
+        self.file_path = file_path
+        self.cap = None
+        if file_path and os.path.exists(file_path):
+            self.cap = cv2.VideoCapture(file_path)
+            if self.cap.isOpened():
+                self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                self._fps = self.cap.get(cv2.CAP_PROP_FPS)
+                if self._fps <= 0:
+                    self._fps = 30  # Default if FPS cannot be determined
+                logger.info(f"Opened video file {file_path} with {self.width}x{self.height} resolution at {self._fps}fps")
+            else:
+                logger.error(f"Failed to open video file {file_path}")
+                self.cap = None
+        else:
+            logger.info(f"No video file provided or file doesn't exist, using test pattern")
+        
+        # Set up a simple static image for fallback
+        self._static_image = numpy.zeros((self.height, self.width, 3), dtype=numpy.uint8)
+        self._static_image[:, :, 0] = 255  # Make it red for easy identification
+        
+    def get_codec_compatibility(self, remote_sdp):
+        """
+        Check if the remote SDP offer contains compatible codecs.
+        Returns a tuple (compatible, message) where compatible is a boolean
+        and message contains details if not compatible.
+        """
+        if not remote_sdp:
+            return (False, "No remote SDP provided")
+            
+        # Simple SDP parsing to check for codecs
+        remote_codecs = []
+        
+        # Look for codec information in the SDP
+        lines = remote_sdp.split("\n")
+        for line in lines:
+            # Check for rtpmap entries (which define codecs)
+            if line.startswith("a=rtpmap:"):
+                # Extract codec name from rtpmap
+                codec_info = line.split(" ")[1].split("/")[0].upper()
+                remote_codecs.append(codec_info)
+                logger.info(f"Found codec in SDP: {codec_info}")
+                
+            # Also check for fmtp lines which might contain specific codec parameters
+            elif line.startswith("a=fmtp:") and "profile-level-id" in line:
+                remote_codecs.append("H264")  # H.264 specific parameters 
+                logger.info("Detected H.264 parameters in SDP")
+                
+        # If no specific codec info was found but we see a video section,
+        # assume basic compatibility rather than rejecting
+        if not remote_codecs and "m=video" in remote_sdp:
+            logger.info("No specific codec info found, but video section exists. Assuming compatibility.")
+            return (True, "Assuming compatibility based on video section presence")
+                
+        # Check if we found any compatible codecs
+        compatible_codecs = [c for c in remote_codecs if c in self._supported_codecs or c in ["H264", "VP8"]]
+        
+        if compatible_codecs:
+            return (True, f"Found compatible codecs: {', '.join(compatible_codecs)}")
+        elif remote_codecs:
+            # If we found codecs but none are compatible, return false
+            return (False, f"Found incompatible codecs: {', '.join(remote_codecs)}")
+        else:
+            # More permissive: if we have a video section but couldn't parse codecs, assume it's OK
+            # Most browsers will support at least H.264 or VP8
+            return (True, "No video codecs explicitly found in remote SDP, assuming default compatibility")
     
     async def recv(self):
         pts, time_base = await self._next_timestamp()
         
-        # Create a simple moving color pattern
+        try:
+            # Try to read from video file if available
+            if self.cap and self.cap.isOpened():
+                ret, frame = self.cap.read()
+                if not ret:
+                    # If we've reached the end of the file, start over
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ret, frame = self.cap.read()
+                    if not ret:
+                        # If still can't read, fall back to pattern
+                        logger.warning("Failed to read from video file, using fallback pattern")
+                        return await self._create_pattern_frame(pts, time_base)
+                
+                # Add timestamp to the frame
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cv2.putText(
+                    frame, 
+                    f"Simulated Boat - {timestamp}", 
+                    (20, 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    0.8, 
+                    (255, 255, 255), 
+                    2
+                )
+                
+                # Create VideoFrame from numpy array
+                video_frame = VideoFrame.from_ndarray(frame, format="bgr24")
+                video_frame.pts = pts
+                video_frame.time_base = time_base
+                return video_frame
+            else:
+                # If no video file is available, create a pattern
+                return await self._create_pattern_frame(pts, time_base)
+                
+        except Exception as e:
+            logger.error(f"Error in video frame generation: {e}")
+            # Return a static frame on error
+            frame = VideoFrame.from_ndarray(self._static_image, format="bgr24")
+            frame.pts = pts
+            frame.time_base = time_base
+            return frame
+    
+    async def _create_pattern_frame(self, pts, time_base):
+        """Create a simple color pattern as a fallback."""
+        # Create a simple color pattern
         img = numpy.zeros((self.height, self.width, 3), dtype=numpy.uint8)
         
-        # Generate a moving pattern
-        rows, cols = self.height, self.width
+        # Increment counter
         self._counter = (self._counter + 1) % 360
         
-        # Create rainbow-like color pattern with movement
-        for i in range(rows):
-            for j in range(cols):
-                hue = (self._counter + i + j) % 180 # Limit to 180 for better colors
+        # Simple color gradient
+        for y in range(self.height):
+            for x in range(self.width):
+                hue = (self._counter + y + x) % 180
                 if hue < 60:
                     r, g, b = 255, int(hue * 4.25), 0
                 elif hue < 120:
                     r, g, b = int((120 - hue) * 4.25), 255, 0
                 else:
                     r, g, b = 0, 255, int((hue - 120) * 4.25)
-                
-                img[i, j] = [r, g, b]
+                img[y, x] = [b, g, r]  # OpenCV uses BGR
         
-        # Add text to the frame
+        # Add timestamp to the frame
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cv2.putText(
             img, 
@@ -86,20 +207,22 @@ class TestPatternVideoTrack(VideoStreamTrack):
         frame = VideoFrame.from_ndarray(img, format="bgr24")
         frame.pts = pts
         frame.time_base = time_base
-        
         return frame
-    
+            
     async def _next_timestamp(self):
-        """
-        Generate the next frame timestamp.
-        """
-        time_base = fractions.Fraction(1, 90000)  # common timebase for video
+        """Generate the next frame timestamp."""
         self._timestamp += int(90000 / self._fps)
-        return self._timestamp, time_base
+        return self._timestamp, self._time_base
+    
+    def __del__(self):
+        """Clean up resources when object is destroyed."""
+        if self.cap and self.cap.isOpened():
+            self.cap.release()
 
 
-# Rename this to keep compatibility with the rest of the code
-LoopedVideoStreamTrack = TestPatternVideoTrack
+# Rename TestPatternVideoTrack to maintain compatibility with existing code
+TestPatternVideoTrack = FileVideoStreamTrack
+LoopedVideoStreamTrack = FileVideoStreamTrack
 
 class SimulatedDevice:
     """
@@ -109,7 +232,7 @@ class SimulatedDevice:
     def __init__(self, device_id, server_url, video_file=None):
         self.device_id = device_id
         self.server_url = server_url.format(device_id=device_id)
-        self.video_file = video_file  # Keep for compatibility but we don't use it anymore
+        self.video_file = video_file
         self.websocket = None
         self.peer_connections = {}
         self.command_log = []
@@ -333,43 +456,53 @@ class SimulatedDevice:
                 
             logger.info(f"Received WebRTC offer from client {client_id}")
             
-            # Create a new RTCPeerConnection if needed
-            if client_id in self.peer_connections:
-                # Close existing connection
-                pc = self.peer_connections[client_id]
-                await pc.close()
-                
-            # Create new connection
+            # Create a new RTCPeerConnection with default configuration
             pc = RTCPeerConnection()
             self.peer_connections[client_id] = pc
+            logger.info(f"Created peer connection for client {client_id}")
             
-            # Set up the video track
-            try:
-                video_track = LoopedVideoStreamTrack()
-                pc.addTrack(video_track)
-            except Exception as e:
-                logger.error(f"Error setting up video track: {str(e)}")
-                await pc.close()
-                del self.peer_connections[client_id]
-                return
+            # Set up the video track - use the video file if provided
+            video_track = FileVideoStreamTrack(self.video_file)
+            pc.addTrack(video_track)
+            logger.info(f"Initialized video stream with {video_track.width}x{video_track.height} resolution at {video_track._fps}fps")
             
             # Set up ICE candidate handling
             @pc.on("icecandidate")
             async def on_icecandidate(candidate):
                 if candidate:
-                    message = {
-                        "type": "webrtc",
-                        "subtype": "ice_candidate",
-                        "boatId": self.device_id,
-                        "clientId": client_id,
-                        "candidate": {
-                            "candidate": candidate.candidate,
-                            "sdpMid": candidate.sdpMid,
-                            "sdpMLineIndex": candidate.sdpMLineIndex
+                    try:
+                        # Ensure all required properties exist
+                        if not hasattr(candidate, 'candidate') or not candidate.candidate:
+                            logger.warning(f"Skipping invalid ICE candidate (missing candidate string)")
+                            return
+                            
+                        if not hasattr(candidate, 'sdpMid') or candidate.sdpMid is None:
+                            logger.warning(f"ICE candidate missing sdpMid, using empty string")
+                            sdpMid = ""
+                        else:
+                            sdpMid = candidate.sdpMid
+                            
+                        if not hasattr(candidate, 'sdpMLineIndex') or candidate.sdpMLineIndex is None:
+                            logger.warning(f"ICE candidate missing sdpMLineIndex, using 0")
+                            sdpMLineIndex = 0
+                        else:
+                            sdpMLineIndex = candidate.sdpMLineIndex
+                            
+                        message = {
+                            "type": "webrtc",
+                            "subtype": "ice_candidate",
+                            "boatId": self.device_id,
+                            "clientId": client_id,
+                            "candidate": {
+                                "candidate": candidate.candidate,
+                                "sdpMid": sdpMid,
+                                "sdpMLineIndex": sdpMLineIndex
+                            }
                         }
-                    }
-                    await self.websocket.send(json.dumps(message))
-                    logger.debug(f"Sent ICE candidate to client {client_id}")
+                        await self.websocket.send(json.dumps(message))
+                        logger.debug(f"Sent ICE candidate to client {client_id}")
+                    except Exception as e:
+                        logger.warning(f"Error sending ICE candidate: {str(e)}")
             
             # Apply the remote description (the offer)
             sdp = message.get("sdp")
@@ -378,34 +511,72 @@ class SimulatedDevice:
                 return
                 
             try:
+                # Check codec compatibility first
+                video_track = FileVideoStreamTrack(self.video_file)
+                compatible, message = video_track.get_codec_compatibility(sdp)
+                logger.info(f"Codec compatibility check: {message}")
+                
+                if not compatible:
+                    # Send error to client
+                    error_response = {
+                        "type": "webrtc",
+                        "subtype": "error",
+                        "boatId": self.device_id,
+                        "clientId": client_id,
+                        "error": "codec_incompatible",
+                        "message": message
+                    }
+                    await self.websocket.send(json.dumps(error_response))
+                    logger.warning(f"Rejecting WebRTC offer due to codec incompatibility: {message}")
+                    
+                    # Clean up and return
+                    if client_id in self.peer_connections:
+                        await self.peer_connections[client_id].close()
+                        del self.peer_connections[client_id]
+                    return
+                
+                # Set the remote description (the offer)
                 await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="offer"))
                 logger.info(f"Set remote offer from client {client_id}")
                 
-                # Create answer
                 try:
+                    # Create and set the answer - with explicit error handling
                     answer = await pc.createAnswer()
-                except Exception as e:
-                    logger.error(f"Error creating answer: {str(e)}")
-                    raise
-                
-                # Set local description
-                try:
+                    
+                    # Ensure we have valid media descriptions in the answer
+                    if not answer.sdp or "m=video" not in answer.sdp:
+                        logger.warning("No video stream in answer, checking codec compatibility")
+                        # We could add fallback codec handling here if needed
+                        # For now, just log and let the process continue
+                    
                     await pc.setLocalDescription(answer)
-                except Exception as e:
-                    logger.error(f"Error setting local description: {str(e)}")
-                    raise
+                    
+                    # Send the answer to the client
+                    response = {
+                        "type": "webrtc",
+                        "subtype": "answer",
+                        "boatId": self.device_id,
+                        "clientId": client_id,
+                        "sdp": pc.localDescription.sdp,
+                        "sdpType": "answer"
+                    }
+                    await self.websocket.send(json.dumps(response))
+                    logger.info(f"Sent answer to client {client_id}")
+                    
+                except ValueError as codec_error:
+                    # This is likely a codec negotiation error
+                    logger.error(f"Codec negotiation error: {str(codec_error)}")
+                    error_response = {
+                        "type": "webrtc",
+                        "subtype": "error",
+                        "boatId": self.device_id,
+                        "clientId": client_id,
+                        "error": "codec_negotiation_failed",
+                        "message": f"Failed to negotiate compatible video codec: {str(codec_error)}"
+                    }
+                    await self.websocket.send(json.dumps(error_response))
+                    raise  # Re-raise to trigger the cleanup in the outer exception handler
                 
-                # Send answer to client
-                response = {
-                    "type": "webrtc",
-                    "subtype": "answer",
-                    "boatId": self.device_id,
-                    "clientId": client_id,
-                    "sdp": pc.localDescription.sdp,
-                    "sdpType": "answer"
-                }
-                await self.websocket.send(json.dumps(response))
-                logger.info(f"Sent answer to client {client_id}")
             except Exception as e:
                 logger.error(f"Error processing WebRTC offer: {str(e)}")
                 # Close the peer connection on error
@@ -432,46 +603,71 @@ class SimulatedDevice:
     
     async def create_webrtc_offer(self, client_id):
         """Create and send a WebRTC offer to a client."""
-        # Create a new RTCPeerConnection
-        pc = RTCPeerConnection()
-        self.peer_connections[client_id] = pc
-        
-        # Set up the video track from our looped video file
-        video_track = LoopedVideoStreamTrack()
-        pc.addTrack(video_track)
-        
-        # Set up ICE candidate handling
-        @pc.on("icecandidate")
-        async def on_icecandidate(candidate):
-            if candidate:
-                message = {
-                    "type": "webrtc",
-                    "subtype": "ice_candidate",
-                    "boatId": self.device_id,
-                    "clientId": client_id,
-                    "candidate": {
-                        "candidate": candidate.candidate,
-                        "sdpMid": candidate.sdpMid,
-                        "sdpMLineIndex": candidate.sdpMLineIndex
-                    }
-                }
-                await self.websocket.send(json.dumps(message))
-                logger.debug(f"Sent ICE candidate to client {client_id}")
-        
-        # Create offer
-        offer = await pc.createOffer()
-        await pc.setLocalDescription(offer)
-        
-        # Send offer to client via relay server
-        message = {
-            "type": "webrtc",
-            "subtype": "offer",
-            "boatId": self.device_id,
-            "clientId": client_id,
-            "sdp": pc.localDescription.sdp
-        }
-        await self.websocket.send(json.dumps(message))
-        logger.info(f"Sent WebRTC offer to client {client_id}")
+        try:
+            # Create a new RTCPeerConnection with default configuration
+            pc = RTCPeerConnection()
+            self.peer_connections[client_id] = pc
+            logger.info(f"Created peer connection for client {client_id}")
+            
+            # Set up the video track - use the video file if provided
+            video_track = FileVideoStreamTrack(self.video_file)
+            pc.addTrack(video_track)
+            logger.info(f"Initialized video stream with {video_track.width}x{video_track.height} resolution at {video_track._fps}fps")
+            
+            # Set up ICE candidate handling
+            @pc.on("icecandidate")
+            async def on_icecandidate(candidate):
+                if candidate:
+                    try:
+                        # Ensure all required properties exist
+                        if not hasattr(candidate, 'candidate') or not candidate.candidate:
+                            logger.warning(f"Skipping invalid ICE candidate (missing candidate string)")
+                            return
+                            
+                        if not hasattr(candidate, 'sdpMid') or candidate.sdpMid is None:
+                            logger.warning(f"ICE candidate missing sdpMid, using empty string")
+                            sdpMid = ""
+                        else:
+                            sdpMid = candidate.sdpMid
+                            
+                        if not hasattr(candidate, 'sdpMLineIndex') or candidate.sdpMLineIndex is None:
+                            logger.warning(f"ICE candidate missing sdpMLineIndex, using 0")
+                            sdpMLineIndex = 0
+                        else:
+                            sdpMLineIndex = candidate.sdpMLineIndex
+                            
+                        message = {
+                            "type": "webrtc",
+                            "subtype": "ice_candidate",
+                            "boatId": self.device_id,
+                            "clientId": client_id,
+                            "candidate": {
+                                "candidate": candidate.candidate,
+                                "sdpMid": sdpMid,
+                                "sdpMLineIndex": sdpMLineIndex
+                            }
+                        }
+                        await self.websocket.send(json.dumps(message))
+                        logger.debug(f"Sent ICE candidate to client {client_id}")
+                    except Exception as e:
+                        logger.warning(f"Error sending ICE candidate: {str(e)}")
+            
+            # Create offer
+            offer = await pc.createOffer()
+            await pc.setLocalDescription(offer)
+            
+            # Send offer to client via relay server
+            message = {
+                "type": "webrtc",
+                "subtype": "offer",
+                "boatId": self.device_id,
+                "clientId": client_id,
+                "sdp": pc.localDescription.sdp
+            }
+            await self.websocket.send(json.dumps(message))
+            logger.info(f"Sent WebRTC offer to client {client_id}")
+        except Exception as e:
+            logger.error(f"Error creating WebRTC offer: {str(e)}")
     
     async def handle_command(self, command):
         """Handle command messages from clients."""
@@ -594,15 +790,21 @@ class SimulatedDevice:
 
 
 async def main():
+    # Check if a video file is provided as an environment variable
+    video_file = os.environ.get("VIDEO_FILE")
+    
     # Create and run the simulated device
     device = SimulatedDevice(
         device_id=DEVICE_ID,
         server_url=WS_SERVER_URL,
-        video_file=None  # No longer needed
+        video_file=video_file
     )
     
     logger.info(f"Starting simulated device: {DEVICE_ID}")
-    logger.info(f"Using test pattern video stream")
+    if video_file and os.path.exists(video_file):
+        logger.info(f"Using video file: {video_file}")
+    else:
+        logger.info(f"Using test pattern video stream")
     logger.info(f"WebSocket server: {WS_SERVER_URL.format(device_id=DEVICE_ID)}")
     
     try:

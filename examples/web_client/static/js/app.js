@@ -299,6 +299,9 @@ class PiBoatClient {
             case 'close':
                 this.stopVideo();
                 break;
+            case 'error':
+                await this.handleWebRTCError(data);
+                break;
             default:
                 this.consoleLog(`Received unknown WebRTC message subtype: ${subtype}`, 'warning');
                 break;
@@ -339,6 +342,33 @@ class PiBoatClient {
             }
         } catch (error) {
             this.consoleLog(`Error adding ICE candidate: ${error.message}`, 'error');
+        }
+    }
+    
+    // Handle WebRTC error message
+    async handleWebRTCError(data) {
+        const errorType = data.error || 'unknown';
+        const errorMessage = data.message || 'Unknown WebRTC error';
+        
+        this.consoleLog(`WebRTC error: ${errorType} - ${errorMessage}`, 'error');
+        
+        // Update UI
+        document.getElementById('video-status').textContent = `Video error: ${errorType}`;
+        
+        // Handle specific error types
+        if (errorType === 'codec_incompatible' || errorType === 'codec_negotiation_failed') {
+            this.consoleLog('Video codec compatibility issue. Try with a different browser or device.', 'error');
+            // Could attempt a fallback strategy here
+        }
+        
+        // Close the connection if it exists
+        if (this.peerConnection) {
+            this.peerConnection.close();
+            this.peerConnection = null;
+            
+            // Re-enable the start button
+            document.getElementById('start-video-btn').disabled = false;
+            document.getElementById('stop-video-btn').disabled = true;
         }
     }
     
@@ -527,8 +557,93 @@ class PiBoatClient {
                 }
             };
             
+            // Add connection state change handler
+            this.peerConnection.onconnectionstatechange = () => {
+                this.consoleLog(`WebRTC connection state: ${this.peerConnection.connectionState}`, 'info');
+                if (this.peerConnection.connectionState === 'failed' || 
+                    this.peerConnection.connectionState === 'closed') {
+                    this.consoleLog('WebRTC connection failed or closed', 'error');
+                    document.getElementById('video-status').textContent = 'Video connection failed';
+                }
+            };
+            
+            // Add a transceiver to receive video (IMPORTANT: this specifies we want to receive video)
+            const transceiver = this.peerConnection.addTransceiver('video', {
+                direction: 'recvonly'
+            });
+            
             // Create and send offer
-            const offer = await this.peerConnection.createOffer();
+            const offer = await this.peerConnection.createOffer({
+                offerToReceiveVideo: true, // Explicitly state we want to receive video
+                offerToReceiveAudio: false // We don't need audio
+            });
+            
+            // Ensure SDP contains appropriate video codecs by modifying the SDP directly
+            // This is more reliable than the codec parameter which isn't supported in all browsers
+            let sdpLines = offer.sdp.split('\n');
+            let videoSectionIndex = sdpLines.findIndex(line => line.startsWith('m=video'));
+            
+            if (videoSectionIndex !== -1) {
+                // Ensure H.264 and VP8 are at the beginning of the codec list to prefer them
+                // This modifies the payload ordering in the m=video line
+                let videoLine = sdpLines[videoSectionIndex];
+                let videoLineParts = videoLine.split(' ');
+                
+                // Find payload types for H.264 and VP8
+                let h264Payload = null;
+                let vp8Payload = null;
+                
+                for (let i = videoSectionIndex + 1; i < sdpLines.length; i++) {
+                    if (sdpLines[i].startsWith('m=')) break; // Stop at next section
+                    
+                    if (sdpLines[i].includes('H264')) {
+                        h264Payload = sdpLines[i].split(':')[0].split(' ')[1];
+                    } else if (sdpLines[i].includes('VP8')) {
+                        vp8Payload = sdpLines[i].split(':')[0].split(' ')[1];
+                    }
+                }
+                
+                // Reorder payload types in the m=video line to prefer H.264 and VP8
+                if (h264Payload || vp8Payload) {
+                    let newPayloadOrder = [h264Payload, vp8Payload].filter(Boolean);
+                    let otherPayloads = videoLineParts.slice(3).filter(p => !newPayloadOrder.includes(p));
+                    let newVideoLine = `${videoLineParts[0]} ${videoLineParts[1]} ${videoLineParts[2]} ${newPayloadOrder.join(' ')} ${otherPayloads.join(' ')}`;
+                    sdpLines[videoSectionIndex] = newVideoLine.trim();
+                }
+            }
+            
+            // Apply the modified SDP
+            offer.sdp = sdpLines.join('\n');
+            
+            // Ensure SDP has at least one video codec entry that the simulated device recognizes
+            if (!offer.sdp.includes('VP8') && !offer.sdp.includes('H264')) {
+                // If neither VP8 nor H264 is found, add explicit VP8 entry
+                // Find the end of video section to add our codec
+                let videoSectionEnd = sdpLines.length;
+                for (let i = videoSectionIndex + 1; i < sdpLines.length; i++) {
+                    if (sdpLines[i].startsWith('m=')) {
+                        videoSectionEnd = i;
+                        break;
+                    }
+                }
+                
+                // Add VP8 codec entry - format is standard WebRTC format
+                let payloadType = 96; // Standard VP8 payload type
+                let insertIndex = videoSectionEnd;
+                sdpLines.splice(insertIndex, 0, `a=rtpmap:${payloadType} VP8/90000`);
+                
+                // Also add VP8 to the m=video line
+                let videoLine = sdpLines[videoSectionIndex];
+                sdpLines[videoSectionIndex] = `${videoLine} ${payloadType}`;
+                
+                // Rebuild the SDP
+                offer.sdp = sdpLines.join('\n');
+                this.consoleLog('Added VP8 codec to offer', 'info');
+            }
+
+            // Log the modified SDP for debugging
+            this.consoleLog('Created offer with prioritized video codecs', 'info');
+            
             await this.peerConnection.setLocalDescription(offer);
             
             // Generate a session ID
@@ -547,8 +662,20 @@ class PiBoatClient {
             
             document.getElementById('video-status').textContent = 'Connecting video...';
             this.consoleLog('Sent WebRTC offer to device', 'info');
+            
+            // Set a timeout to detect if connection fails
+            setTimeout(() => {
+                if (this.peerConnection && 
+                    (this.peerConnection.connectionState === 'new' || 
+                     this.peerConnection.connectionState === 'connecting')) {
+                    this.consoleLog('WebRTC connection taking too long, may have failed', 'warning');
+                    document.getElementById('video-status').textContent = 'Video connection timeout';
+                }
+            }, 10000); // 10 second timeout
+            
         } catch (error) {
             this.consoleLog(`Error starting video: ${error.message}`, 'error');
+            document.getElementById('video-status').textContent = 'Video setup failed';
         }
     }
     

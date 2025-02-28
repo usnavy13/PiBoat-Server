@@ -8,6 +8,7 @@ pydantic
 python-dotenv
 pytest
 pytest-asyncio
-numpy
+numpy>=1.19.0
 jinja2
 python-multipart
+opencv-python>=4.5.0

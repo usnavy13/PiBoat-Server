@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     debug_mode: bool = Field(default=False, env="DEBUG_MODE")
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     log_dir: str = Field(default="logs", env="LOG_DIR")
+    video_file: str = Field(default=None, env="VIDEO_FILE")
     
     # Connection management
     max_reconnect_attempts: int = Field(default=5, env="MAX_RECONNECT_ATTEMPTS")
