@@ -16,6 +16,7 @@ from server.connection_manager import ConnectionManager
 from server.webrtc_handler import WebRTCHandler
 from server.telemetry_handler import TelemetryHandler
 from server.command_handler import CommandHandler
+from server.debug_tools import message_debugger
 
 # Configure logging
 logging.basicConfig(
@@ -77,6 +78,13 @@ async def health_check():
     }
 
 
+@app.get("/debug/device-messages/{device_id}")
+async def analyze_device_messages(device_id: str):
+    """Analyze captured device messages for debugging."""
+    results = message_debugger.analyze_device_messages(device_id)
+    return results
+
+
 @app.websocket("/ws/device/{device_id}")
 async def device_websocket_endpoint(websocket: WebSocket, device_id: str):
     """WebSocket endpoint for device connections."""
@@ -84,11 +92,65 @@ async def device_websocket_endpoint(websocket: WebSocket, device_id: str):
     try:
         while True:
             data = await websocket.receive_json()
+            # Log the raw message for debugging
+            logger.debug(f"Received raw message from device {device_id}: {data}")
+            
+            # Capture message for debugging
+            message_debugger.capture_device_message(device_id, data)
+            
             message_type = data.get("type")
+            
+            # Transform GPS data format for compatibility
+            if message_type is None:
+                # Check if it looks like telemetry data with GPS position
+                has_position = "position" in data and isinstance(data.get("position"), dict)
+                has_gps_fields = has_position and "latitude" in data["position"] and "longitude" in data["position"]
+                
+                if has_gps_fields:
+                    logger.info(f"Detected GPS data in non-standard format from device {device_id}, transforming to standard format")
+                    
+                    # Create a new properly formatted telemetry message
+                    transformed_data = {
+                        "type": "telemetry",
+                        "subtype": "sensor_data",
+                        "sequence": data.get("sequence", 0),
+                        "timestamp": data.get("timestamp", time.time() * 1000),
+                        "data": {
+                            "gps": {
+                                "latitude": data["position"]["latitude"],
+                                "longitude": data["position"]["longitude"]
+                            }
+                        }
+                    }
+                    
+                    # Add additional navigation data if available
+                    if "navigation" in data and isinstance(data["navigation"], dict):
+                        if "heading" in data["navigation"]:
+                            transformed_data["data"]["heading"] = data["navigation"]["heading"]
+                        if "speed" in data["navigation"]:
+                            transformed_data["data"]["speed"] = data["navigation"]["speed"]
+                    
+                    # Add battery status if available
+                    if "status" in data and isinstance(data["status"], dict) and "battery" in data["status"]:
+                        transformed_data["data"]["battery"] = data["status"]["battery"]
+                    
+                    logger.debug(f"Transformed data: {transformed_data}")
+                    data = transformed_data
+                    message_type = "telemetry"
+                else:
+                    # Check for missing or null type for other message formats
+                    logger.warning(f"Device {device_id} sent message without valid type field: {data}")
+                    if any(key in data for key in ["gps", "location", "coordinates", "latitude", "longitude"]):
+                        logger.info(f"Message appears to be telemetry data, processing as telemetry: {data}")
+                        # Add type field and process as telemetry
+                        data["type"] = "telemetry"
+                        data["subtype"] = "sensor_data"  # Add required subtype field
+                        message_type = "telemetry"
             
             if message_type == "webrtc":
                 await webrtc_handler.handle_device_message(device_id, data, connection_manager)
             elif message_type == "telemetry":
+                logger.debug(f"Processing telemetry data from device {device_id}: {data}")
                 await telemetry_handler.process_telemetry(device_id, data, connection_manager)
             elif message_type == "pong":
                 # Update last activity time to prevent timeout

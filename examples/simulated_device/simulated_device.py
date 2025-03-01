@@ -35,7 +35,7 @@ logger.info(f"av version: {pkg_resources.get_distribution('av').version}")
 logger.info(f"websockets version: {pkg_resources.get_distribution('websockets').version}")
 
 # Configuration
-WS_SERVER_URL = "ws://localhost:8000/ws/device/{device_id}"
+WS_SERVER_URL = "ws://ec2-100-27-211-169.compute-1.amazonaws.com:8000/ws/device/{device_id}"
 DEVICE_ID = f"simulated-boat-1"
 TELEMETRY_INTERVAL = 1.0  # Send telemetry every 1 second
 

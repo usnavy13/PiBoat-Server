@@ -23,7 +23,7 @@ MANIFEST
 .pytest_cache/
 .coverage
 htmlcov/
-
+debug_logs/
 # Virtual Environment
 .venv/
 env/

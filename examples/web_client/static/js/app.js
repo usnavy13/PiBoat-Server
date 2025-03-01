@@ -600,42 +600,36 @@ class PiBoatClient {
     
     // Update telemetry UI with the latest data
     updateTelemetryUI() {
-        // GPS data
-        if (this.telemetryData.sensor_data && this.telemetryData.sensor_data.data) {
-            const sensorData = this.telemetryData.sensor_data.data;
-            
-            // GPS
-            if (sensorData.gps) {
-                document.getElementById('gps-lat').textContent = `Latitude: ${sensorData.gps.latitude || '--'}`;
-                document.getElementById('gps-lon').textContent = `Longitude: ${sensorData.gps.longitude || '--'}`;
-                document.getElementById('gps-heading').textContent = `Heading: ${sensorData.gps.heading || '--'}°`;
-                document.getElementById('gps-speed').textContent = `Speed: ${sensorData.gps.speed || '--'} knots`;
-            }
-            
-            // System status
-            if (sensorData.status) {
-                document.getElementById('system-status').textContent = `Status: ${sensorData.status}`;
-            }
-            
-            // Battery
-            if (sensorData.battery) {
-                document.getElementById('battery-level').textContent = `Battery: ${sensorData.battery.level || '--'}%`;
-            }
-            
-            // System data
-            if (sensorData.system) {
-                document.getElementById('cpu-temp').textContent = `CPU Temp: ${sensorData.system.cpu_temp || '--'}°C`;
-                document.getElementById('signal-strength').textContent = `Signal: ${sensorData.system.signal_strength || '--'} dBm`;
-            }
-            
-            // Environment data
-            if (sensorData.environment) {
-                document.getElementById('water-temp').textContent = `Water Temp: ${sensorData.environment.water_temp || '--'}°C`;
-                document.getElementById('air-temp').textContent = `Air Temp: ${sensorData.environment.air_temp || '--'}°C`;
-                document.getElementById('air-pressure').textContent = `Pressure: ${sensorData.environment.air_pressure || '--'} hPa`;
-                document.getElementById('humidity').textContent = `Humidity: ${sensorData.environment.humidity || '--'}%`;
-            }
-        }
+        // Create a container for all telemetry data
+        const telemetryContainer = document.querySelector('.telemetry-panels');
+        
+        // Clear existing content
+        telemetryContainer.innerHTML = '';
+        
+        // Create a single panel for raw telemetry
+        const rawPanel = document.createElement('div');
+        rawPanel.className = 'telemetry-panel raw-telemetry';
+        rawPanel.style.width = '100%';
+        
+        // Create header
+        const header = document.createElement('h3');
+        header.textContent = 'Raw Telemetry Data';
+        rawPanel.appendChild(header);
+        
+        // Create pre element for formatted JSON
+        const pre = document.createElement('pre');
+        pre.className = 'raw-telemetry-data';
+        pre.style.maxHeight = '300px';
+        pre.style.overflow = 'auto';
+        pre.style.whiteSpace = 'pre-wrap';
+        pre.style.textAlign = 'left';
+        
+        // Format the telemetry data as JSON
+        const formattedJson = JSON.stringify(this.telemetryData, null, 2);
+        pre.textContent = formattedJson || 'No telemetry data available';
+        
+        rawPanel.appendChild(pre);
+        telemetryContainer.appendChild(rawPanel);
     }
     
     // Select a device
