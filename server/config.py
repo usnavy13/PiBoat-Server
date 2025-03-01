@@ -8,11 +8,10 @@ class Settings(BaseSettings):
     """Application settings, loaded from environment variables."""
     
     # Server configuration
-    port: int = Field(default=8000, env="PORT")
+    port: int = 8000  # Hardcoded port value
     debug_mode: bool = Field(default=False, env="DEBUG_MODE")
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     log_dir: str = Field(default="logs", env="LOG_DIR")
-    video_file: str = Field(default=None, env="VIDEO_FILE")
     
     # Connection management
     max_reconnect_attempts: int = Field(default=5, env="MAX_RECONNECT_ATTEMPTS")
@@ -34,6 +33,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"  # Ignore extra attributes instead of rejecting them
 
 
 # Create settings instance

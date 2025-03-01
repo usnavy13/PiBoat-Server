@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 
 # Define default settings
 DEFAULT_HOST = "0.0.0.0"
-DEFAULT_PORT = 8080
+DEFAULT_PORT = 8080  # Hardcoded port
 DEFAULT_RELAY_SERVER = "ws://localhost:8000"
 DEFAULT_LOG_DIR = "logs"
 
@@ -121,7 +121,6 @@ def main():
     """Main entry point for the web client."""
     parser = argparse.ArgumentParser(description="PiBoat Web Client")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Host to bind to")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port to bind to")
     parser.add_argument("--relay-server", default=DEFAULT_RELAY_SERVER, 
                         help="WebSocket relay server URL")
     parser.add_argument("--log-dir", default=DEFAULT_LOG_DIR,
@@ -137,14 +136,14 @@ def main():
     os.environ["RELAY_SERVER"] = args.relay_server
     
     logger = logging.getLogger("web_client")
-    logger.info(f"Starting web client on http://{args.host}:{args.port}")
+    logger.info(f"Starting web client on http://{args.host}:{DEFAULT_PORT}")
     logger.info(f"Connecting to relay server at {args.relay_server}")
     
-    # Start the Uvicorn server
+    # Start the Uvicorn server with hardcoded port
     uvicorn.run(
         "app:app",
         host=args.host,
-        port=args.port,
+        port=DEFAULT_PORT,
         reload=True,
         log_level="info"
     )

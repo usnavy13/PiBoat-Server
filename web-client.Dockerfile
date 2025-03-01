@@ -35,4 +35,4 @@ ENV RELAY_SERVER=ws://relay-server:8000
 EXPOSE $PORT
 
 # Run the web client - use shell form for environment variable expansion
-CMD python app.py --host 0.0.0.0 --port 8080 --relay-server $RELAY_SERVER --log-dir logs 
+CMD python app.py --host 0.0.0.0 --relay-server $RELAY_SERVER --log-dir logs 

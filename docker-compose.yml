@@ -2,43 +2,46 @@ version: '3.8'
 
 services:
   relay-server:
-    image: ghcr.io/${GITHUB_REPOSITORY:-your-username/piboat-server}/relay-server:latest
+    image: ghcr.io/usnavy13/piboat-server/relay-server:latest
     # Uncomment the build section if you want to build locally instead
     # build:
     #   context: .
     #   dockerfile: server.Dockerfile
     ports:
-      - "8000:8000"
+      - "${RELAY_SERVER_EXTERNAL_PORT}:8000"
     environment:
-      - PORT=8000
-      - MAX_RECONNECT_ATTEMPTS=5
-      - RECONNECT_INTERVAL=2
-      - LOG_LEVEL=INFO
+      - MAX_RECONNECT_ATTEMPTS=${MAX_RECONNECT_ATTEMPTS}
+      - RECONNECT_INTERVAL=${RECONNECT_INTERVAL}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - DEBUG_MODE=${DEBUG_MODE}
+      - CONNECTION_TIMEOUT=${CONNECTION_TIMEOUT}
+      - PING_INTERVAL=${PING_INTERVAL}
+      - WEBRTC_ICE_SERVERS=${WEBRTC_ICE_SERVERS}
+      - TELEMETRY_BUFFER_SIZE=${TELEMETRY_BUFFER_SIZE}
     volumes:
       - ./logs:/app/logs
     restart: on-failure:5
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 10s
       
   web-client:
-    image: ghcr.io/${GITHUB_REPOSITORY:-your-username/piboat-server}/web-client:latest
+    image: ghcr.io/usnavy13/piboat-server/web-client:latest
     # Uncomment the build section if you want to build locally instead
     # build:
     #   context: .
     #   dockerfile: web-client.Dockerfile
     ports:
-      - "8080:8080"
+      - "${WEB_CLIENT_EXTERNAL_PORT}:8080"
     environment:
-      - PORT=8080
-      - RELAY_SERVER=ws://relay-server:8000
-      - LOG_LEVEL=INFO
+      - RELAY_SERVER=${RELAY_SERVER_URL}
+      - LOG_LEVEL=${LOG_LEVEL}
     volumes:
       - ./logs/web_client:/app/logs
     restart: unless-stopped
-    depends_on:
-      relay-server:
-        condition: service_healthy 
+    # depends_on:
+    #   relay-server:
+    #     condition: service_healthy 

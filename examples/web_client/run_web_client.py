@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 # Default settings
 DEFAULT_HOST = "0.0.0.0"
-DEFAULT_PORT = 8080
+DEFAULT_PORT = 8080  # Hardcoded port
 DEFAULT_RELAY_SERVER = "ws://localhost:8000"
 DEFAULT_LOG_DIR = "logs"
 
@@ -25,7 +25,7 @@ def main():
     """Run the PiBoat Web Client."""
     parser = argparse.ArgumentParser(description="PiBoat Web Client")
     parser.add_argument("--host", default=DEFAULT_HOST, help=f"Host to bind to (default: {DEFAULT_HOST})")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"Port to bind to (default: {DEFAULT_PORT})")
+    # Remove port argument, use hardcoded value
     parser.add_argument("--relay-server", default=DEFAULT_RELAY_SERVER, 
                         help=f"WebSocket relay server URL (default: {DEFAULT_RELAY_SERVER})")
     parser.add_argument("--log-dir", default=DEFAULT_LOG_DIR,
@@ -33,7 +33,7 @@ def main():
     
     args = parser.parse_args()
     
-    print(f"Starting PiBoat Web Client on http://{args.host}:{args.port}")
+    print(f"Starting PiBoat Web Client on http://{args.host}:{DEFAULT_PORT}")
     print(f"Connecting to relay server: {args.relay_server}")
     print(f"Logs will be written to: {args.log_dir}")
     print("Press Ctrl+C to stop")
@@ -46,7 +46,6 @@ def main():
         sys.executable,
         "app.py",
         "--host", args.host,
-        "--port", str(args.port),
         "--relay-server", args.relay_server,
         "--log-dir", args.log_dir
     ]
