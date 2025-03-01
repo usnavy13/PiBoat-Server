@@ -2,9 +2,11 @@ version: '3.8'
 
 services:
   relay-server:
-    build:
-      context: .
-      dockerfile: server.Dockerfile
+    image: ghcr.io/${GITHUB_REPOSITORY:-your-username/piboat-server}/relay-server:latest
+    # Uncomment the build section if you want to build locally instead
+    # build:
+    #   context: .
+    #   dockerfile: server.Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -23,9 +25,11 @@ services:
       start_period: 10s
       
   web-client:
-    build:
-      context: .
-      dockerfile: web-client.Dockerfile
+    image: ghcr.io/${GITHUB_REPOSITORY:-your-username/piboat-server}/web-client:latest
+    # Uncomment the build section if you want to build locally instead
+    # build:
+    #   context: .
+    #   dockerfile: web-client.Dockerfile
     ports:
       - "8080:8080"
     environment:
