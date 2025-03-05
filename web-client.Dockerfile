@@ -17,11 +17,11 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy web client requirements
-COPY examples/web_client/requirements.txt .
+COPY web_client/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy web client code
-COPY examples/web_client /app/
+COPY web_client /app/
 
 # Create logs directory
 RUN mkdir -p /app/logs

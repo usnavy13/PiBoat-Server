@@ -11,9 +11,6 @@ import sys
 import subprocess
 import argparse
 
-# Add parent directory to path so we can import from examples.web_client
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 # Default settings
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8080  # Hardcoded port

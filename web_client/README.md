@@ -37,7 +37,7 @@ pip install fastapi uvicorn jinja2 websockets aiortc
 2. Navigate to the web client directory:
 
 ```bash
-cd examples/web_client
+cd web_client
 ```
 
 ## Usage
