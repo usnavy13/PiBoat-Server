@@ -488,11 +488,9 @@ class PiBoatClient {
         this.updateTelemetryUI();
         
         // Update map if GPS data is available
-        if (telemetryType === 'sensor_data' && data.data && data.data.gps) {
-            const gps = data.data.gps;
-            if (gps.latitude && gps.longitude) {
-                this.updateBoatPosition(gps.latitude, gps.longitude, gps.heading);
-            }
+        if (this.telemetryData.sensor_data && this.telemetryData.sensor_data.data && this.telemetryData.sensor_data.data.gps) {
+            const gpsData = this.telemetryData.sensor_data.data.gps;
+            this.updateBoatPosition(gpsData.latitude, gpsData.longitude, gpsData.heading);
         }
     }
     
@@ -600,36 +598,22 @@ class PiBoatClient {
     
     // Update telemetry UI with the latest data
     updateTelemetryUI() {
-        // Create a container for all telemetry data
-        const telemetryContainer = document.querySelector('.telemetry-panels');
-        
-        // Clear existing content
-        telemetryContainer.innerHTML = '';
-        
-        // Create a single panel for raw telemetry
-        const rawPanel = document.createElement('div');
-        rawPanel.className = 'telemetry-panel raw-telemetry';
-        rawPanel.style.width = '100%';
-        
-        // Create header
-        const header = document.createElement('h3');
-        header.textContent = 'Raw Telemetry Data';
-        rawPanel.appendChild(header);
-        
-        // Create pre element for formatted JSON
-        const pre = document.createElement('pre');
-        pre.className = 'raw-telemetry-data';
-        pre.style.maxHeight = '300px';
-        pre.style.overflow = 'auto';
-        pre.style.whiteSpace = 'pre-wrap';
-        pre.style.textAlign = 'left';
-        
-        // Format the telemetry data as JSON
+        // Format the telemetry data as JSON with proper indentation
         const formattedJson = JSON.stringify(this.telemetryData, null, 2);
-        pre.textContent = formattedJson || 'No telemetry data available';
         
-        rawPanel.appendChild(pre);
-        telemetryContainer.appendChild(rawPanel);
+        // Update the raw telemetry data display
+        const rawTelemetryElement = document.getElementById('raw-telemetry-data');
+        if (rawTelemetryElement) {
+            rawTelemetryElement.textContent = formattedJson || 'No telemetry data available';
+        } else {
+            this.consoleLog('Raw telemetry element not found in DOM', 'warning');
+        }
+        
+        // Update map if GPS data is available
+        if (this.telemetryData.sensor_data && this.telemetryData.sensor_data.data && this.telemetryData.sensor_data.data.gps) {
+            const gpsData = this.telemetryData.sensor_data.data.gps;
+            this.updateBoatPosition(gpsData.latitude, gpsData.longitude, gpsData.heading);
+        }
     }
     
     // Select a device
