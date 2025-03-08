@@ -26,6 +26,12 @@ class PiBoatClient {
         this.hasInitialPosition = false;
         this.userPannedMap = false; // Track if user has manually interacted with the map
         
+        // Waypoint related properties
+        this.waypoints = []; // Array of {lat, lng} waypoints
+        this.waypointMarkers = []; // Array of waypoint markers
+        this.waypointPath = null; // Polyline connecting waypoints
+        this.waypointsEnabled = false; // Flag to indicate if waypoint mode is active
+        
         // Initialize the application
         this.initEventListeners();
         this.initMap();
@@ -94,6 +100,9 @@ class PiBoatClient {
             // Create empty feature group for boat path
             this.boatPath = L.featureGroup().addTo(this.map);
             
+            // Create empty feature group for waypoints path
+            this.waypointPath = L.featureGroup().addTo(this.map);
+            
             // Add map controls
             L.control.scale().addTo(this.map);
             
@@ -102,6 +111,10 @@ class PiBoatClient {
             clearPathControl.onAdd = (map) => {
                 const div = L.DomUtil.create('div', 'custom-map-control');
                 div.innerHTML = '<button class="secondary-btn" title="Clear Path">Clear Path</button>';
+                
+                // Prevent click events from propagating to the map
+                L.DomEvent.disableClickPropagation(div);
+                
                 div.onclick = () => this.clearBoatPath();
                 return div;
             };
@@ -112,6 +125,10 @@ class PiBoatClient {
             autoCenterControl.onAdd = (map) => {
                 const div = L.DomUtil.create('div', 'custom-map-control auto-center-control');
                 div.innerHTML = '<button class="secondary-btn" title="Toggle Auto-Center">Follow Boat</button>';
+                
+                // Prevent click events from propagating to the map
+                L.DomEvent.disableClickPropagation(div);
+                
                 div.onclick = () => {
                     this.userPannedMap = !this.userPannedMap;
                     const btn = div.querySelector('button');
@@ -131,6 +148,48 @@ class PiBoatClient {
             };
             autoCenterControl.addTo(this.map);
             
+            // Add waypoint control
+            const waypointControl = L.control({position: 'topright'});
+            waypointControl.onAdd = (map) => {
+                const div = L.DomUtil.create('div', 'custom-map-control waypoint-control');
+                div.innerHTML = '<button class="secondary-btn" title="Set Waypoints">Set Waypoints</button>';
+                
+                // Prevent click events from propagating to the map
+                L.DomEvent.disableClickPropagation(div);
+                
+                div.onclick = () => this.toggleWaypointMode();
+                return div;
+            };
+            waypointControl.addTo(this.map);
+            
+            // Add clear waypoints control
+            const clearWaypointsControl = L.control({position: 'topright'});
+            clearWaypointsControl.onAdd = (map) => {
+                const div = L.DomUtil.create('div', 'custom-map-control clear-waypoints-control');
+                div.innerHTML = '<button class="secondary-btn" title="Clear Waypoints">Clear Waypoints</button>';
+                
+                // Prevent click events from propagating to the map
+                L.DomEvent.disableClickPropagation(div);
+                
+                div.onclick = () => this.clearWaypoints();
+                return div;
+            };
+            clearWaypointsControl.addTo(this.map);
+            
+            // Add send waypoints control
+            const sendWaypointsControl = L.control({position: 'topright'});
+            sendWaypointsControl.onAdd = (map) => {
+                const div = L.DomUtil.create('div', 'custom-map-control send-waypoints-control');
+                div.innerHTML = '<button class="primary-btn" title="Send Waypoints" disabled>Send Waypoints</button>';
+                
+                // Prevent click events from propagating to the map
+                L.DomEvent.disableClickPropagation(div);
+                
+                div.onclick = () => this.sendWaypointsCommand();
+                return div;
+            };
+            sendWaypointsControl.addTo(this.map);
+            
             // Listen for map drag events to detect user interaction
             this.map.on('dragstart', () => {
                 this.userPannedMap = true;
@@ -138,6 +197,13 @@ class PiBoatClient {
                 if (btn) {
                     btn.textContent = 'Follow Boat';
                     btn.classList.remove('active');
+                }
+            });
+            
+            // Add map click handler for waypoints
+            this.map.on('click', (e) => {
+                if (this.waypointsEnabled) {
+                    this.addWaypoint(e.latlng.lat, e.latlng.lng);
                 }
             });
             
@@ -728,6 +794,9 @@ class PiBoatClient {
         document.getElementById('start-video-btn').disabled = false;
         document.getElementById('stop-video-btn').disabled = false;
         
+        // Update waypoint buttons
+        this.updateSendWaypointsButton();
+        
         this.consoleLog(`Selected device: ${device.name} (${device.id})`, 'info');
     }
     
@@ -1039,24 +1108,42 @@ class PiBoatClient {
         }
     }
     
-    // Update connection status UI
+    // Update connection status
     updateConnectionStatus(status) {
-        const iconElement = document.getElementById('connection-icon');
-        const textElement = document.getElementById('connection-text');
+        const connectionIcon = document.getElementById('connection-icon');
+        const connectionText = document.getElementById('connection-text');
+        const connectButton = document.getElementById('connect-btn');
         
-        iconElement.className = `icon ${status}`;
+        this.connected = status === 'connected';
         
-        switch (status) {
-            case 'connected':
-                textElement.textContent = 'Connected';
-                break;
-            case 'connecting':
-                textElement.textContent = 'Connecting...';
-                break;
-            case 'disconnected':
-                textElement.textContent = 'Disconnected';
-                break;
+        // Update connection UI
+        if (status === 'connected') {
+            connectionIcon.classList.remove('disconnected');
+            connectionIcon.classList.add('connected');
+            connectionText.textContent = 'Connected';
+            connectButton.textContent = 'Disconnect';
+            
+            // Enable refresh devices button
+            document.getElementById('refresh-devices-btn').disabled = false;
+        } else {
+            connectionIcon.classList.remove('connected');
+            connectionIcon.classList.add('disconnected');
+            connectionText.textContent = 'Disconnected';
+            connectButton.textContent = 'Connect';
+            
+            // Disable all command controls
+            this.updateCommandControls(false);
+            
+            // Disable devices buttons
+            document.getElementById('refresh-devices-btn').disabled = true;
+            
+            // Disable video buttons
+            document.getElementById('start-video-btn').disabled = true;
+            document.getElementById('stop-video-btn').disabled = true;
         }
+        
+        // Update send waypoints button
+        this.updateSendWaypointsButton();
     }
     
     // Log message to console
@@ -1127,6 +1214,279 @@ class PiBoatClient {
             // Need to call invalidateSize when the map container size changes
             this.map.invalidateSize();
             this.consoleLog('Map resized', 'info');
+        }
+    }
+    
+    // Toggle waypoint mode on/off
+    toggleWaypointMode() {
+        this.waypointsEnabled = !this.waypointsEnabled;
+        
+        // Update the button text and style
+        const btn = document.querySelector('.waypoint-control button');
+        if (btn) {
+            if (this.waypointsEnabled) {
+                btn.textContent = 'Cancel Waypoints';
+                btn.classList.add('active');
+                this.map.getContainer().style.cursor = 'crosshair';
+                this.consoleLog('Waypoint mode enabled - click on the map to add waypoints', 'info');
+            } else {
+                btn.textContent = 'Set Waypoints';
+                btn.classList.remove('active');
+                this.map.getContainer().style.cursor = '';
+                this.consoleLog('Waypoint mode disabled', 'info');
+            }
+        }
+    }
+    
+    // Add a waypoint to the map
+    addWaypoint(lat, lng) {
+        if (!this.map) return;
+        
+        try {
+            // Create waypoint object
+            const waypoint = {
+                latitude: parseFloat(lat.toFixed(6)),
+                longitude: parseFloat(lng.toFixed(6))
+            };
+            
+            // Add to waypoints array
+            this.waypoints.push(waypoint);
+            
+            // Create waypoint marker
+            const waypointIcon = L.divIcon({
+                className: 'waypoint-marker',
+                html: `<div class="waypoint-number">${this.waypoints.length}</div>`,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+            
+            const marker = L.marker([lat, lng], {
+                icon: waypointIcon,
+                title: `Waypoint ${this.waypoints.length}`
+            }).addTo(this.map);
+            
+            // Add popup with waypoint info and delete button
+            const popupContent = `
+                <div class="waypoint-popup">
+                    <h3>Waypoint ${this.waypoints.length}</h3>
+                    <p>Latitude: ${waypoint.latitude}</p>
+                    <p>Longitude: ${waypoint.longitude}</p>
+                    <button class="delete-waypoint-btn" data-index="${this.waypoints.length - 1}">Delete</button>
+                </div>
+            `;
+            
+            marker.bindPopup(popupContent);
+            
+            // Add click handler for delete button
+            marker.on('popupopen', () => {
+                const deleteBtn = document.querySelector('.delete-waypoint-btn');
+                if (deleteBtn) {
+                    deleteBtn.addEventListener('click', (e) => {
+                        const index = parseInt(e.target.dataset.index, 10);
+                        this.removeWaypoint(index);
+                        this.map.closePopup();
+                    });
+                }
+            });
+            
+            // Add to markers array
+            this.waypointMarkers.push(marker);
+            
+            // Update waypoint path
+            this.updateWaypointPath();
+            
+            // Enable send waypoints button if there are waypoints
+            this.updateSendWaypointsButton();
+            
+            this.consoleLog(`Added waypoint ${this.waypoints.length}: ${waypoint.latitude}, ${waypoint.longitude}`, 'info');
+        } catch (error) {
+            this.consoleLog(`Error adding waypoint: ${error.message}`, 'error');
+        }
+    }
+    
+    // Remove a waypoint from the map
+    removeWaypoint(index) {
+        if (index < 0 || index >= this.waypoints.length) return;
+        
+        try {
+            // Remove the waypoint and marker
+            this.waypoints.splice(index, 1);
+            
+            // Remove all markers and recreate them (to update numbering)
+            this.clearWaypointMarkers();
+            
+            // Recreate all markers with updated numbers
+            this.waypoints.forEach((wp, i) => {
+                const waypointIcon = L.divIcon({
+                    className: 'waypoint-marker',
+                    html: `<div class="waypoint-number">${i + 1}</div>`,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                });
+                
+                const marker = L.marker([wp.latitude, wp.longitude], {
+                    icon: waypointIcon,
+                    title: `Waypoint ${i + 1}`
+                }).addTo(this.map);
+                
+                // Add popup with waypoint info and delete button
+                const popupContent = `
+                    <div class="waypoint-popup">
+                        <h3>Waypoint ${i + 1}</h3>
+                        <p>Latitude: ${wp.latitude}</p>
+                        <p>Longitude: ${wp.longitude}</p>
+                        <button class="delete-waypoint-btn" data-index="${i}">Delete</button>
+                    </div>
+                `;
+                
+                marker.bindPopup(popupContent);
+                
+                // Add click handler for delete button
+                marker.on('popupopen', () => {
+                    const deleteBtn = document.querySelector('.delete-waypoint-btn');
+                    if (deleteBtn) {
+                        deleteBtn.addEventListener('click', (e) => {
+                            const idx = parseInt(e.target.dataset.index, 10);
+                            this.removeWaypoint(idx);
+                            this.map.closePopup();
+                        });
+                    }
+                });
+                
+                this.waypointMarkers.push(marker);
+            });
+            
+            // Update waypoint path
+            this.updateWaypointPath();
+            
+            // Update send waypoints button
+            this.updateSendWaypointsButton();
+            
+            this.consoleLog(`Removed waypoint ${index + 1}`, 'info');
+        } catch (error) {
+            this.consoleLog(`Error removing waypoint: ${error.message}`, 'error');
+        }
+    }
+    
+    // Clear all waypoint markers from the map
+    clearWaypointMarkers() {
+        // Remove all existing markers
+        this.waypointMarkers.forEach(marker => {
+            marker.remove();
+        });
+        
+        // Clear the markers array
+        this.waypointMarkers = [];
+    }
+    
+    // Clear all waypoints
+    clearWaypoints() {
+        // Clear the waypoints array
+        this.waypoints = [];
+        
+        // Clear the markers
+        this.clearWaypointMarkers();
+        
+        // Clear the path
+        if (this.waypointPath) {
+            this.waypointPath.clearLayers();
+        }
+        
+        // Update send waypoints button
+        this.updateSendWaypointsButton();
+        
+        this.consoleLog('Cleared all waypoints', 'info');
+    }
+    
+    // Update the path connecting waypoints
+    updateWaypointPath() {
+        if (!this.map) return;
+        
+        try {
+            // Clear existing path
+            if (this.waypointPath) {
+                this.waypointPath.clearLayers();
+            }
+            
+            if (this.waypoints.length > 1) {
+                // Create waypoint path coordinates
+                const pathCoords = this.waypoints.map(wp => [wp.latitude, wp.longitude]);
+                
+                // Create a polyline for the path
+                const polyline = L.polyline(pathCoords, {
+                    color: '#00FF00',
+                    weight: 3,
+                    opacity: 0.7,
+                    dashArray: '10, 5',
+                }).addTo(this.map);
+                
+                // Add to feature group
+                this.waypointPath.addLayer(polyline);
+            }
+        } catch (error) {
+            this.consoleLog(`Error updating waypoint path: ${error.message}`, 'error');
+        }
+    }
+    
+    // Update the send waypoints button
+    updateSendWaypointsButton() {
+        const btn = document.querySelector('.send-waypoints-control button');
+        if (btn) {
+            btn.disabled = this.waypoints.length === 0 || !this.connected || !this.selectedDeviceId;
+        }
+    }
+    
+    // Send waypoints command to the device
+    async sendWaypointsCommand() {
+        if (!this.connected || !this.selectedDeviceId || this.waypoints.length === 0) return;
+        
+        try {
+            // Increment command counter
+            this.commandCounter++;
+            
+            // Create command object
+            let command;
+            
+            if (this.waypoints.length === 1) {
+                // Single waypoint
+                command = {
+                    type: 'command',
+                    command: 'set_waypoint',
+                    deviceId: this.selectedDeviceId,
+                    command_id: `${this.clientId}-${this.commandCounter}-${Date.now()}`,
+                    data: {
+                        latitude: this.waypoints[0].latitude,
+                        longitude: this.waypoints[0].longitude,
+                        mode: 'autonomous'
+                    }
+                };
+                
+                this.consoleLog(`Sending single waypoint command: ${this.waypoints[0].latitude}, ${this.waypoints[0].longitude}`, 'info');
+            } else {
+                // Multiple waypoints
+                command = {
+                    type: 'command',
+                    command: 'set_waypoints',
+                    deviceId: this.selectedDeviceId,
+                    command_id: `${this.clientId}-${this.commandCounter}-${Date.now()}`,
+                    data: {
+                        waypoints: this.waypoints,
+                        mode: 'autonomous'
+                    }
+                };
+                
+                this.consoleLog(`Sending ${this.waypoints.length} waypoints command`, 'info');
+            }
+            
+            // Send command
+            await this.sendJson(command);
+            
+            // Disable waypoint mode after sending
+            if (this.waypointsEnabled) {
+                this.toggleWaypointMode();
+            }
+        } catch (error) {
+            this.consoleLog(`Error sending waypoints command: ${error.message}`, 'error');
         }
     }
 }

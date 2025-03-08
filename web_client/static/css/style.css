@@ -565,4 +565,109 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     .connection-status {
         margin-top: 0.5rem;
     }
+}
+
+/* Map styles */
+.map-container {
+    margin-top: 1rem;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.map-container h2 {
+    font-size: 1.2rem;
+    margin: 0;
+    padding: 0.5rem 1rem;
+    background-color: var(--section-header-bg);
+    border-bottom: 1px solid var(--border-color);
+}
+
+#boat-map {
+    height: 400px;
+    width: 100%;
+    z-index: 1;
+}
+
+/* Custom map controls */
+.custom-map-control {
+    background: white;
+    padding: 5px;
+    border-radius: 4px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+    margin-bottom: 5px;
+}
+
+.custom-map-control button {
+    cursor: pointer;
+    font-size: 12px;
+    padding: 4px 8px;
+}
+
+.custom-map-control button.active {
+    background-color: var(--accent-color);
+    color: white;
+}
+
+/* Waypoint styles */
+.waypoint-marker {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background-color: #00CC00;
+    border: 2px solid white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    text-align: center;
+    color: white;
+    font-weight: bold;
+    line-height: 20px;
+    font-size: 14px;
+}
+
+.waypoint-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+}
+
+.waypoint-popup h3 {
+    margin-top: 0;
+    margin-bottom: 5px;
+    font-size: 16px;
+}
+
+.waypoint-popup p {
+    margin: 2px 0;
+    font-size: 14px;
+}
+
+.delete-waypoint-btn {
+    background-color: #ff4444;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-top: 5px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.delete-waypoint-btn:hover {
+    background-color: #cc0000;
+}
+
+.send-waypoints-control button {
+    background-color: var(--accent-color);
+    color: white;
+}
+
+.send-waypoints-control button:hover:not(:disabled) {
+    background-color: var(--accent-hover-color);
+}
+
+.send-waypoints-control button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
 } 
