@@ -44,7 +44,7 @@ class PiBoatClient {
         document.getElementById('connect-btn').addEventListener('click', () => this.toggleConnection());
         
         // Devices
-        document.getElementById('refresh-devices-btn').addEventListener('click', () => this.requestDevicesList());
+        document.getElementById('refresh-devices-btn').addEventListener('click', () => this.refreshDevices());
         
         // Commands
         document.getElementById('stop-btn').addEventListener('click', () => this.sendStopCommand());
@@ -383,20 +383,34 @@ class PiBoatClient {
     
     // Connect to the relay server
     async connect() {
+        if (this.connected) {
+            this.consoleLog('Already connected', 'warning');
+            return;
+        }
+        
+        // Update UI to show connecting status
+        this.updateConnectionStatus('connecting');
+        
+        // Get the server URL from the input field
+        const serverUrl = document.getElementById('server-url').value.trim();
+        if (!serverUrl) {
+            this.consoleLog('Server URL is required', 'error');
+            this.updateConnectionStatus('disconnected');
+            return;
+        }
+        
         try {
-            this.serverUrl = document.getElementById('server-url').value;
-            const wsUrl = `${this.serverUrl}/ws/client/${this.clientId}`.replace('http://', 'ws://').replace('https://', 'wss://');
-            
-            this.updateConnectionStatus('connecting');
-            this.consoleLog(`Connecting to ${wsUrl}...`, 'info');
-            
+            // Connect to the WebSocket server
+            const wsUrl = `${serverUrl}/ws/client/${this.clientId}`.replace('http://', 'ws://').replace('https://', 'wss://');
             this.websocket = new WebSocket(wsUrl);
             
-            // Set up event handlers
+            // Set up WebSocket event handlers
             this.websocket.onopen = () => this.handleWebSocketOpen();
             this.websocket.onmessage = (event) => this.handleWebSocketMessage(event);
             this.websocket.onerror = (error) => this.handleWebSocketError(error);
             this.websocket.onclose = () => this.handleWebSocketClose();
+            
+            this.consoleLog(`Connecting to ${wsUrl}...`, 'info');
         } catch (error) {
             this.consoleLog(`Connection error: ${error.message}`, 'error');
             this.updateConnectionStatus('disconnected');
@@ -419,8 +433,9 @@ class PiBoatClient {
         document.getElementById('connect-btn').textContent = 'Connect';
         
         // Update device list
-        const deviceListElement = document.getElementById('device-list');
-        deviceListElement.innerHTML = '<li class="empty-message">No devices available</li>';
+        const deviceSelect = document.getElementById('device-select');
+        deviceSelect.innerHTML = '<option value="">No devices available</option>';
+        deviceSelect.disabled = true;
         
         // Disable controls
         document.getElementById('refresh-devices-btn').disabled = true;
@@ -440,23 +455,18 @@ class PiBoatClient {
     
     // Handle WebSocket open event
     handleWebSocketOpen() {
-        this.connected = true;
+        this.consoleLog('Connected to relay server', 'success');
         this.updateConnectionStatus('connected');
-        this.consoleLog('Connected to server', 'success');
-        document.getElementById('connect-btn').textContent = 'Disconnect';
-        document.getElementById('refresh-devices-btn').disabled = false;
         
-        // Request device list
-        this.requestDevicesList();
+        // Enable the refresh devices button when connected
+        document.getElementById('refresh-devices-btn').disabled = false;
     }
     
     // Handle WebSocket message event
     async handleWebSocketMessage(event) {
         try {
             const data = JSON.parse(event.data);
-            const messageType = data.type;
-            
-            this.consoleLog(`Received ${messageType} message`, 'info');
+            const messageType = data.type || 'unknown';
             
             switch (messageType) {
                 case 'ping':
@@ -464,9 +474,6 @@ class PiBoatClient {
                     break;
                 case 'devices_list':
                     await this.handleDevicesList(data);
-                    break;
-                case 'connection_status':
-                    await this.handleConnectionStatus(data);
                     break;
                 case 'device_connected':
                     await this.handleDeviceConnected(data);
@@ -480,14 +487,19 @@ class PiBoatClient {
                 case 'webrtc':
                     await this.handleWebRTC(data);
                     break;
+                case 'connection_status':
+                    await this.handleConnectionStatus(data);
+                    break;
                 case 'error':
                     this.consoleLog(`Server error: ${data.message}`, 'error');
                     break;
                 default:
-                    this.consoleLog(`Unknown message type: ${messageType}`, 'warning');
+                    this.consoleLog(`Received unknown message type: ${messageType}`, 'warning');
+                    this.consoleLog(`Message content: ${JSON.stringify(data)}`, 'info');
             }
         } catch (error) {
-            this.consoleLog(`Error handling message: ${error.message}`, 'error');
+            this.consoleLog(`Error handling WebSocket message: ${error.message}`, 'error');
+            console.error('Raw message:', event.data);
         }
     }
     
@@ -515,50 +527,30 @@ class PiBoatClient {
         const devices = data.devices || [];
         this.deviceList = devices;
         
-        const deviceListElement = document.getElementById('device-list');
-        deviceListElement.innerHTML = '';
+        // Log the devices received
+        this.consoleLog(`Received ${devices.length} device(s)`, 'info');
         
-        if (devices.length === 0) {
-            const emptyItem = document.createElement('li');
-            emptyItem.textContent = 'No devices available';
-            emptyItem.className = 'empty-message';
-            deviceListElement.appendChild(emptyItem);
-        } else {
-            devices.forEach(device => {
-                const deviceItem = document.createElement('li');
-                const isConnected = device.connected ? 'Connected' : 'Disconnected';
-                
-                // Update the device list item with name if available
-                const deviceName = device.name || device.id;
-                deviceItem.textContent = `${deviceName} (${isConnected})`;
-                deviceItem.dataset.deviceId = device.id;
-                
-                if (device.id === this.selectedDeviceId) {
-                    deviceItem.classList.add('selected');
-                }
-                
-                if (!device.connected) {
-                    deviceItem.style.opacity = '0.5';
-                }
-                
-                deviceItem.addEventListener('click', () => {
-                    if (device.connected) {
-                        this.selectDevice(device.id);
-                        // Connect to the device to start receiving telemetry
-                        this.connectToDevice(device.id);
-                    }
-                });
-                
-                deviceListElement.appendChild(deviceItem);
-            });
-            
-            this.consoleLog(`Received ${devices.length} devices`, 'info');
-        }
+        // Update the device dropdown
+        updateDeviceList(devices);
+        
+        // Re-enable the refresh button
+        document.getElementById('refresh-devices-btn').disabled = false;
     }
     
     // Connect to the selected device to start receiving telemetry
     async connectToDevice(deviceId) {
-        if (!this.connected || !deviceId) return;
+        if (!this.connected) {
+            this.consoleLog('Cannot connect to device: Not connected to server', 'warning');
+            return;
+        }
+        
+        if (!deviceId) {
+            this.consoleLog('Cannot connect to device: No device ID provided', 'warning');
+            return;
+        }
+        
+        // Update the UI to show we're connecting
+        document.getElementById('video-status').textContent = 'Connecting to device...';
         
         try {
             await this.sendJson({
@@ -568,8 +560,12 @@ class PiBoatClient {
             
             this.consoleLog(`Connecting to device ${deviceId} for telemetry`, 'info');
             document.getElementById('video-status').textContent = 'Connected (telemetry only)';
+            
+            // Enable command controls since we're connected to a device now
+            this.updateCommandControls(true);
         } catch (error) {
             this.consoleLog(`Error connecting to device: ${error.message}`, 'error');
+            document.getElementById('video-status').textContent = 'Connection failed';
         }
     }
     
@@ -581,7 +577,7 @@ class PiBoatClient {
         this.consoleLog(`Device ${deviceId} is ${status}`, 'info');
         
         // Refresh device list
-        this.requestDevicesList();
+        this.refreshDevices();
         
         // If this is the currently selected device, update UI
         if (deviceId === this.selectedDeviceId && status === 'disconnected') {
@@ -602,13 +598,35 @@ class PiBoatClient {
     // Handle device connected message
     async handleDeviceConnected(data) {
         const deviceId = data.deviceId;
-        const status = data.status || 'connected';
+        const device = this.deviceList.find(d => d.id === deviceId);
         
-        this.consoleLog(`Device ${deviceId} connection status: ${status}`, 'info');
-        
-        if (status === 'connected') {
-            // Update UI to show that telemetry is now active
+        if (device) {
+            this.consoleLog(`Device ${device.name || deviceId} connected successfully`, 'success');
             document.getElementById('video-status').textContent = 'Connected (telemetry only)';
+            
+            // Enable controls for the connected device
+            this.updateCommandControls(true);
+            
+            // If this device is the one we selected, update UI
+            if (deviceId === this.selectedDeviceId) {
+                // Enable video controls
+                document.getElementById('start-video-btn').disabled = false;
+                
+                // Clear any previous telemetry data
+                this.telemetryData = {};
+                this.updateTelemetryUI();
+                
+                // Make an explicit request for initial telemetry data
+                try {
+                    await this.sendJson({
+                        type: 'get_telemetry',
+                        deviceId: deviceId
+                    });
+                    this.consoleLog("Requested initial telemetry data", 'info');
+                } catch (error) {
+                    this.consoleLog(`Error requesting telemetry: ${error.message}`, 'error');
+                }
+            }
         }
     }
     
@@ -765,39 +783,34 @@ class PiBoatClient {
 
     // Select a device from the list
     selectDevice(deviceId) {
-        if (!deviceId) return;
-        
-        // Find the device in the list
-        const device = this.deviceList.find(d => d.id === deviceId);
-        if (!device) {
-            this.consoleLog(`Device ${deviceId} not found in device list`, 'warning');
-            return;
-        }
-        
-        // Update selected device
         this.selectedDeviceId = deviceId;
+        const device = this.deviceList.find(d => d.id === deviceId);
         
-        // Update UI
-        const deviceItems = document.querySelectorAll('#device-list li');
-        deviceItems.forEach(item => {
-            if (item.dataset.deviceId === deviceId) {
-                item.classList.add('selected');
-            } else {
-                item.classList.remove('selected');
+        if (device) {
+            // Instead of updating the list item styling, set the dropdown value
+            const deviceSelect = document.getElementById('device-select');
+            deviceSelect.value = deviceId;
+            
+            // Enable controls for the selected device
+            updateUIForDeviceSelection(device);
+            
+            this.consoleLog(`Selected device: ${device.name || device.id}`, 'info');
+            
+            // Clear any existing telemetry data
+            this.telemetryData = {};
+            this.updateTelemetryUI();
+            
+            // Automatically connect to the device to start telemetry
+            if (this.connected) {
+                // First connect to the device
+                this.connectToDevice(deviceId).then(() => {
+                    // Then request initial telemetry data
+                    setTimeout(() => {
+                        this.requestTelemetryData();
+                    }, 500); // Small delay to ensure connection is established
+                });
             }
-        });
-        
-        // Enable commands
-        this.updateCommandControls(true);
-        
-        // Enable video controls
-        document.getElementById('start-video-btn').disabled = false;
-        document.getElementById('stop-video-btn').disabled = false;
-        
-        // Update waypoint buttons
-        this.updateSendWaypointsButton();
-        
-        this.consoleLog(`Selected device: ${device.name} (${device.id})`, 'info');
+        }
     }
     
     // Send emergency stop command to the boat
@@ -886,14 +899,26 @@ class PiBoatClient {
     }
     
     // Request devices list from the server
-    async requestDevicesList() {
-        if (!this.connected) return;
+    async refreshDevices() {
+        if (!this.connected) {
+            this.consoleLog('Not connected to server', 'warning');
+            return;
+        }
+        
+        document.getElementById('refresh-devices-btn').disabled = true;
+        this.consoleLog("Refreshing device list...", 'info');
         
         try {
             await this.sendJson({ type: 'devices_list' });
-            this.consoleLog('Requesting devices list', 'info');
+            this.consoleLog('Requested devices list', 'info');
+            
+            // Enable the button after a timeout even if we don't get a response
+            setTimeout(() => {
+                document.getElementById('refresh-devices-btn').disabled = false;
+            }, 5000);
         } catch (error) {
             this.consoleLog(`Error requesting devices list: ${error.message}`, 'error');
+            document.getElementById('refresh-devices-btn').disabled = false;
         }
     }
     
@@ -1110,40 +1135,40 @@ class PiBoatClient {
     
     // Update connection status
     updateConnectionStatus(status) {
-        const connectionIcon = document.getElementById('connection-icon');
-        const connectionText = document.getElementById('connection-text');
+        const statusIcon = document.getElementById('connection-icon');
+        const statusText = document.getElementById('connection-text');
         const connectButton = document.getElementById('connect-btn');
+        const refreshBtn = document.getElementById('refresh-devices-btn');
         
-        this.connected = status === 'connected';
+        if (!statusIcon || !statusText) return;
         
-        // Update connection UI
-        if (status === 'connected') {
-            connectionIcon.classList.remove('disconnected');
-            connectionIcon.classList.add('connected');
-            connectionText.textContent = 'Connected';
-            connectButton.textContent = 'Disconnect';
-            
-            // Enable refresh devices button
-            document.getElementById('refresh-devices-btn').disabled = false;
-        } else {
-            connectionIcon.classList.remove('connected');
-            connectionIcon.classList.add('disconnected');
-            connectionText.textContent = 'Disconnected';
-            connectButton.textContent = 'Connect';
-            
-            // Disable all command controls
-            this.updateCommandControls(false);
-            
-            // Disable devices buttons
-            document.getElementById('refresh-devices-btn').disabled = true;
-            
-            // Disable video buttons
-            document.getElementById('start-video-btn').disabled = true;
-            document.getElementById('stop-video-btn').disabled = true;
+        // Remove existing classes
+        statusIcon.classList.remove('disconnected', 'connecting', 'connected');
+        
+        switch(status) {
+            case 'disconnected':
+                statusIcon.classList.add('disconnected');
+                statusText.textContent = 'Disconnected';
+                connectButton.textContent = 'Connect';
+                refreshBtn.disabled = true;
+                this.connected = false;
+                break;
+            case 'connecting':
+                statusIcon.classList.add('connecting');
+                statusText.textContent = 'Connecting...';
+                connectButton.textContent = 'Cancel';
+                refreshBtn.disabled = true;
+                break;
+            case 'connected':
+                statusIcon.classList.add('connected');
+                statusText.textContent = 'Connected';
+                connectButton.textContent = 'Disconnect';
+                refreshBtn.disabled = false; // Enable refresh button when connected
+                this.connected = true;
+                // When connected, immediately request the device list
+                this.refreshDevices();
+                break;
         }
-        
-        // Update send waypoints button
-        this.updateSendWaypointsButton();
     }
     
     // Log message to console
@@ -1489,10 +1514,130 @@ class PiBoatClient {
             this.consoleLog(`Error sending waypoints command: ${error.message}`, 'error');
         }
     }
+
+    // Request telemetry data from the selected device
+    async requestTelemetryData() {
+        if (!this.connected || !this.selectedDeviceId) {
+            this.consoleLog('Cannot request telemetry: No device selected or not connected', 'warning');
+            return;
+        }
+        
+        try {
+            await this.sendJson({
+                type: 'get_telemetry',
+                deviceId: this.selectedDeviceId
+            });
+            this.consoleLog('Requested telemetry data', 'info');
+        } catch (error) {
+            this.consoleLog(`Error requesting telemetry: ${error.message}`, 'error');
+        }
+    }
 }
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize client
     window.piBoatClient = new PiBoatClient();
-}); 
+    
+    // Make sure we run setupDeviceSelection to wire up the dropdown event listener
+    setupDeviceSelection();
+    
+    // Add an explicit event listener for the refresh button
+    document.getElementById('refresh-devices-btn').addEventListener('click', () => {
+        if (window.piBoatClient) {
+            window.piBoatClient.refreshDevices();
+        }
+    });
+});
+
+// Update the updateDeviceList function to work with the PiBoatClient
+function updateDeviceList(devices) {
+    const deviceSelect = document.getElementById('device-select');
+    
+    // Clear current options
+    deviceSelect.innerHTML = '';
+    
+    if (!devices || devices.length === 0) {
+        // If no devices, show "No devices" option
+        const option = document.createElement('option');
+        option.value = '';
+        option.text = "No devices available";
+        deviceSelect.appendChild(option);
+        deviceSelect.disabled = true;
+        return;
+    }
+    
+    // Add initial "Select a device" option
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.text = "Select a device...";
+    deviceSelect.appendChild(defaultOption);
+    deviceSelect.disabled = false;
+    
+    // Add devices to the dropdown
+    devices.forEach(device => {
+        const option = document.createElement('option');
+        option.value = device.id;
+        option.text = `${device.name || device.id} (${device.type || 'Unknown'})`;
+        deviceSelect.appendChild(option);
+    });
+    
+    // If there's a currently selected device in PiBoatClient, select it
+    if (window.piBoatClient && window.piBoatClient.selectedDeviceId) {
+        const deviceExists = Array.from(deviceSelect.options).some(option => {
+            return option.value === window.piBoatClient.selectedDeviceId;
+        });
+        
+        if (deviceExists) {
+            deviceSelect.value = window.piBoatClient.selectedDeviceId;
+        } else {
+            // Previously selected device no longer exists
+            window.piBoatClient.selectedDeviceId = null;
+            updateUIForDeviceSelection(null);
+        }
+    }
+}
+
+// Fix the setupDeviceSelection function
+function setupDeviceSelection() {
+    const deviceSelect = document.getElementById('device-select');
+    
+    deviceSelect.addEventListener('change', (e) => {
+        const selectedOption = deviceSelect.options[deviceSelect.selectedIndex];
+        
+        if (!selectedOption.value) {
+            // "No devices" or "Select a device" option
+            updateUIForDeviceSelection(null);
+            if (window.piBoatClient) {
+                window.piBoatClient.selectedDeviceId = null;
+                document.getElementById('video-status').textContent = 'No device connected';
+            }
+            return;
+        }
+        
+        const deviceId = selectedOption.value;
+        if (window.piBoatClient) {
+            // This will also automatically connect to the device
+            window.piBoatClient.selectDevice(deviceId);
+        }
+    });
+}
+
+// Add this function if it doesn't exist yet
+function updateUIForDeviceSelection(device) {
+    const controls = document.querySelectorAll('.command-controls button, .command-controls input[type="range"]');
+    const videoControls = document.querySelectorAll('.video-controls button');
+    
+    if (!device) {
+        // No device selected, disable controls
+        controls.forEach(control => control.disabled = true);
+        videoControls.forEach(control => control.disabled = true);
+        document.getElementById('video-status').textContent = 'No device connected';
+        return;
+    }
+    
+    // Enable controls
+    controls.forEach(control => control.disabled = false);
+    videoControls.forEach(control => control.disabled = false);
+    document.getElementById('video-status').textContent = `Connected to ${device.name}`;
+} 

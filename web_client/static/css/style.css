@@ -51,7 +51,7 @@ button {
     display: flex;
     flex-direction: column;
     min-height: 100vh;
-    max-width: 1400px;
+    max-width: 95%;
     margin: 0 auto;
     padding: 1rem;
 }
@@ -65,6 +65,47 @@ header {
     border-radius: var(--border-radius);
     box-shadow: var(--box-shadow);
     margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+header h1 {
+    margin-bottom: 0;
+    white-space: nowrap;
+}
+
+.header-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.form-group.inline {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0;
+}
+
+.form-group.inline label {
+    white-space: nowrap;
+    margin-bottom: 0;
+}
+
+.form-group.inline input {
+    width: auto;
+    min-width: 150px;
+}
+
+.device-dropdown.inline {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.device-dropdown.inline select {
+    width: auto;
+    min-width: 150px;
 }
 
 .main-content {
@@ -74,11 +115,6 @@ header {
     margin-bottom: 1rem;
 }
 
-.sidebar {
-    width: 300px;
-    flex-shrink: 0;
-}
-
 .content-area {
     flex: 1;
     display: flex;
@@ -86,7 +122,81 @@ header {
     gap: 1rem;
 }
 
-.section {
+/* Media Container - New container for video and map side by side */
+.media-container {
+    display: flex;
+    gap: 1rem;
+}
+
+.video-container {
+    position: relative;
+    background-color: black;
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    box-shadow: var(--box-shadow);
+    height: 0;
+    padding-bottom: 30%;
+    flex: 1;
+}
+
+#remote-video {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.video-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    background-color: rgba(0, 0, 0, 0.7);
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    font-weight: 500;
+}
+
+.video-controls {
+    position: absolute;
+    bottom: 1rem;
+    right: 1rem;
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Map Container */
+.map-container {
+    background-color: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    padding: 1rem;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.map-container h2 {
+    margin-bottom: 0.75rem;
+}
+
+#boat-map {
+    height: 100%;
+    min-height: 400px;
+    width: 100%;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--gray-300);
+    flex: 1;
+}
+
+/* Commands Section */
+.commands-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
     background-color: white;
     border-radius: var(--border-radius);
     padding: 1rem;
@@ -94,11 +204,36 @@ header {
     box-shadow: var(--box-shadow);
 }
 
+.commands-section .command-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    align-items: flex-start;
+}
+
+/* Horizontal command controls layout */
+.commands-section .command-controls.horizontal {
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.commands-section .form-group {
+    flex: 1;
+    min-width: 250px;
+}
+
+.commands-section .emergency-stop {
+    min-width: 200px;
+    display: flex;
+    align-items: center;
+}
+
 /* Connection Status */
 .connection-status {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    white-space: nowrap;
 }
 
 .icon {
@@ -235,46 +370,6 @@ button:disabled {
     cursor: default;
 }
 
-/* Video Container */
-.video-container {
-    position: relative;
-    background-color: black;
-    border-radius: var(--border-radius);
-    overflow: hidden;
-    box-shadow: var(--box-shadow);
-    height: 0;
-    padding-bottom: 56.25%; /* 16:9 aspect ratio */
-}
-
-#remote-video {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.video-overlay {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    color: white;
-    background-color: rgba(0, 0, 0, 0.7);
-    padding: 0.5rem 1rem;
-    border-radius: var(--border-radius);
-    font-weight: 500;
-}
-
-.video-controls {
-    position: absolute;
-    bottom: 1rem;
-    right: 1rem;
-    display: flex;
-    gap: 0.5rem;
-}
-
 /* Telemetry Container */
 .telemetry-container {
     background-color: white;
@@ -308,26 +403,6 @@ button:disabled {
 .telemetry-value {
     font-size: 0.9rem;
     padding: 0.2rem 0;
-}
-
-/* Map Container */
-.map-container {
-    background-color: white;
-    border-radius: var(--border-radius);
-    box-shadow: var(--box-shadow);
-    padding: 1rem;
-    margin-top: 1rem;
-}
-
-.map-container h2 {
-    margin-bottom: 0.75rem;
-}
-
-#boat-map {
-    height: 300px;
-    width: 100%;
-    border-radius: var(--border-radius);
-    border: 1px solid var(--gray-300);
 }
 
 /* Custom Map Controls */
@@ -543,12 +618,22 @@ input[type="range"]:disabled::-webkit-slider-thumb {
         flex-direction: column;
     }
     
-    .sidebar {
-        width: 100%;
+    .media-container {
+        flex-direction: column;
     }
 }
 
 @media (max-width: 768px) {
+    .commands-section .command-controls, 
+    .commands-section .command-controls.horizontal {
+        flex-direction: column;
+    }
+    
+    .commands-section .form-group,
+    .commands-section .emergency-stop {
+        width: 100%;
+    }
+    
     .telemetry-panels {
         flex-direction: column;
     }
