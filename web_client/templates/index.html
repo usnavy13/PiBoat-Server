@@ -48,22 +48,32 @@
 
                 <div class="section">
                     <h2>Commands</h2>
-                    <div class="form-group">
-                        <label for="command-name">Command:</label>
-                        <select id="command-name" disabled>
-                            <option value="get_status">Get Status</option>
-                            <option value="set_waypoint">Set Waypoint</option>
-                            <option value="set_waypoints">Set Multiple Waypoints</option>
-                            <option value="stop">Stop</option>
-                            <option value="return_to_home">Return to Home</option>
-                            <option value="custom">Custom Command</option>
-                        </select>
+                    <div class="command-controls">
+                        <!-- Emergency Stop Button -->
+                        <div class="emergency-stop">
+                            <button id="stop-btn" class="danger-btn" disabled>EMERGENCY STOP</button>
+                        </div>
+                        
+                        <!-- Rudder Position Control -->
+                        <div class="form-group">
+                            <label for="rudder-position">Rudder Position:</label>
+                            <div class="slider-container">
+                                <input type="range" id="rudder-position" min="-100" max="100" value="0" step="1" disabled>
+                                <div class="slider-value"><span id="rudder-value">0</span>%</div>
+                            </div>
+                            <button id="set-rudder-btn" class="primary-btn" disabled>Set Rudder</button>
+                        </div>
+                        
+                        <!-- Throttle Control -->
+                        <div class="form-group">
+                            <label for="throttle-value">Throttle:</label>
+                            <div class="slider-container">
+                                <input type="range" id="throttle-value" min="0" max="100" value="0" step="1" disabled>
+                                <div class="slider-value"><span id="throttle-display">0</span>%</div>
+                            </div>
+                            <button id="set-throttle-btn" class="primary-btn" disabled>Set Throttle</button>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="command-data">Command Data (JSON):</label>
-                        <textarea id="command-data" rows="6" disabled>{}</textarea>
-                    </div>
-                    <button id="send-command-btn" class="primary-btn" disabled>Send Command</button>
                 </div>
             </div>
 

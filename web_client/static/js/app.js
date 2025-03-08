@@ -24,6 +24,7 @@ class PiBoatClient {
         this.previousPositions = []; // Array of [lat, lng]
         this.positionData = []; // Array of {position: [lat, lng], timestamp: Date, heading: number}
         this.hasInitialPosition = false;
+        this.userPannedMap = false; // Track if user has manually interacted with the map
         
         // Initialize the application
         this.initEventListeners();
@@ -40,8 +41,18 @@ class PiBoatClient {
         document.getElementById('refresh-devices-btn').addEventListener('click', () => this.requestDevicesList());
         
         // Commands
-        document.getElementById('command-name').addEventListener('change', (e) => this.updateCommandTemplate(e.target.value));
-        document.getElementById('send-command-btn').addEventListener('click', () => this.sendCommand());
+        document.getElementById('stop-btn').addEventListener('click', () => this.sendStopCommand());
+        document.getElementById('set-rudder-btn').addEventListener('click', () => this.sendRudderCommand());
+        document.getElementById('set-throttle-btn').addEventListener('click', () => this.sendThrottleCommand());
+        
+        // Add event listeners for sliders to update their displayed values
+        document.getElementById('rudder-position').addEventListener('input', (e) => {
+            document.getElementById('rudder-value').textContent = e.target.value;
+        });
+        
+        document.getElementById('throttle-value').addEventListener('input', (e) => {
+            document.getElementById('throttle-display').textContent = e.target.value;
+        });
         
         // Video
         document.getElementById('start-video-btn').addEventListener('click', () => this.startVideo());
@@ -60,9 +71,9 @@ class PiBoatClient {
             // Create map centered at a default location (will be updated when GPS data arrives)
             this.map = L.map('boat-map').setView([0, 0], 2);
             
-            // Add OpenStreetMap tile layer
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            // Add satellite imagery tile layer
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
                 maxZoom: 19
             }).addTo(this.map);
             
@@ -95,6 +106,40 @@ class PiBoatClient {
                 return div;
             };
             clearPathControl.addTo(this.map);
+            
+            // Add custom control for toggling auto-center
+            const autoCenterControl = L.control({position: 'topright'});
+            autoCenterControl.onAdd = (map) => {
+                const div = L.DomUtil.create('div', 'custom-map-control auto-center-control');
+                div.innerHTML = '<button class="secondary-btn" title="Toggle Auto-Center">Follow Boat</button>';
+                div.onclick = () => {
+                    this.userPannedMap = !this.userPannedMap;
+                    const btn = div.querySelector('button');
+                    if (this.userPannedMap) {
+                        btn.textContent = 'Follow Boat';
+                        btn.classList.remove('active');
+                    } else {
+                        btn.textContent = 'Following';
+                        btn.classList.add('active');
+                        // Center map on boat immediately
+                        if (this.hasInitialPosition) {
+                            this.map.setView(this.boatMarker.getLatLng(), this.map.getZoom());
+                        }
+                    }
+                };
+                return div;
+            };
+            autoCenterControl.addTo(this.map);
+            
+            // Listen for map drag events to detect user interaction
+            this.map.on('dragstart', () => {
+                this.userPannedMap = true;
+                const btn = document.querySelector('.auto-center-control button');
+                if (btn) {
+                    btn.textContent = 'Follow Boat';
+                    btn.classList.remove('active');
+                }
+            });
             
             this.consoleLog('Map initialized', 'info');
         } catch (error) {
@@ -144,11 +189,12 @@ class PiBoatClient {
                     popup.setContent(this.createBoatPopupContent(latitude, longitude, heading, timestamp));
                 }
                 
-                // Auto-pan the map if the marker is near the edge
-                if (this.map.getBounds().contains(position)) {
-                    // If marker is visible, don't change the view
-                } else {
+                // Only auto-pan if user hasn't manually panned the map
+                if (!this.userPannedMap) {
                     this.map.setView(position, this.map.getZoom());
+                } else if (!this.map.getBounds().contains(position)) {
+                    // Option: Add visual indicator that boat is off-screen
+                    // This could be implemented with a small arrow pointing to the boat
                 }
             }
             
@@ -291,32 +337,39 @@ class PiBoatClient {
         }
     }
     
-    // Disconnect from the relay server
+    // Disconnect from the server
     disconnect() {
-        if (this.websocket) {
+        // If the connection is open, close it
+        if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
             this.websocket.close();
         }
         
-        if (this.peerConnection) {
-            this.peerConnection.close();
-            this.peerConnection = null;
-        }
-        
+        // Reset connection status
         this.connected = false;
+        this.selectedDeviceId = null;
         this.updateConnectionStatus('disconnected');
-        this.consoleLog('Disconnected from server', 'info');
         
-        // Disable buttons
+        // Reset UI
+        document.getElementById('connect-btn').textContent = 'Connect';
+        
+        // Update device list
+        const deviceListElement = document.getElementById('device-list');
+        deviceListElement.innerHTML = '<li class="empty-message">No devices available</li>';
+        
+        // Disable controls
         document.getElementById('refresh-devices-btn').disabled = true;
-        document.getElementById('command-name').disabled = true;
-        document.getElementById('command-data').disabled = true;
-        document.getElementById('send-command-btn').disabled = true;
+        this.updateCommandControls(false);
         document.getElementById('start-video-btn').disabled = true;
         document.getElementById('stop-video-btn').disabled = true;
         
-        // Update UI
+        // Reset video
+        this.stopVideo();
         document.getElementById('video-status').textContent = 'No device connected';
-        document.getElementById('connect-btn').textContent = 'Connect';
+        
+        // Reset telemetry display
+        document.getElementById('raw-telemetry-data').textContent = 'No telemetry data available';
+        
+        this.consoleLog('Disconnected from server', 'info');
     }
     
     // Handle WebSocket open event
@@ -408,11 +461,14 @@ class PiBoatClient {
             devices.forEach(device => {
                 const deviceItem = document.createElement('li');
                 const isConnected = device.connected ? 'Connected' : 'Disconnected';
-                deviceItem.textContent = `${device.id} (${isConnected})`;
+                
+                // Update the device list item with name if available
+                const deviceName = device.name || device.id;
+                deviceItem.textContent = `${deviceName} (${isConnected})`;
                 deviceItem.dataset.deviceId = device.id;
                 
                 if (device.id === this.selectedDeviceId) {
-                    deviceItem.className = 'selected';
+                    deviceItem.classList.add('selected');
                 }
                 
                 if (!device.connected) {
@@ -422,6 +478,8 @@ class PiBoatClient {
                 deviceItem.addEventListener('click', () => {
                     if (device.connected) {
                         this.selectDevice(device.id);
+                        // Connect to the device to start receiving telemetry
+                        this.connectToDevice(device.id);
                     }
                 });
                 
@@ -429,6 +487,23 @@ class PiBoatClient {
             });
             
             this.consoleLog(`Received ${devices.length} devices`, 'info');
+        }
+    }
+    
+    // Connect to the selected device to start receiving telemetry
+    async connectToDevice(deviceId) {
+        if (!this.connected || !deviceId) return;
+        
+        try {
+            await this.sendJson({
+                type: 'connect_device',
+                deviceId: deviceId
+            });
+            
+            this.consoleLog(`Connecting to device ${deviceId} for telemetry`, 'info');
+            document.getElementById('video-status').textContent = 'Connected (telemetry only)';
+        } catch (error) {
+            this.consoleLog(`Error connecting to device: ${error.message}`, 'error');
         }
     }
     
@@ -448,11 +523,7 @@ class PiBoatClient {
             document.getElementById('video-status').textContent = 'Device disconnected';
             
             // Disable command and video buttons
-            document.getElementById('command-name').disabled = true;
-            document.getElementById('command-data').disabled = true;
-            document.getElementById('send-command-btn').disabled = true;
-            document.getElementById('start-video-btn').disabled = true;
-            document.getElementById('stop-video-btn').disabled = true;
+            this.updateCommandControls(false);
             
             // Close peer connection if it exists
             if (this.peerConnection) {
@@ -616,61 +687,132 @@ class PiBoatClient {
         }
     }
     
-    // Select a device
+    // Enable or disable command controls based on device selection
+    updateCommandControls(enabled) {
+        // Update the controls
+        document.getElementById('stop-btn').disabled = !enabled;
+        document.getElementById('rudder-position').disabled = !enabled;
+        document.getElementById('set-rudder-btn').disabled = !enabled;
+        document.getElementById('throttle-value').disabled = !enabled;
+        document.getElementById('set-throttle-btn').disabled = !enabled;
+    }
+
+    // Select a device from the list
     selectDevice(deviceId) {
+        if (!deviceId) return;
+        
+        // Find the device in the list
+        const device = this.deviceList.find(d => d.id === deviceId);
+        if (!device) {
+            this.consoleLog(`Device ${deviceId} not found in device list`, 'warning');
+            return;
+        }
+        
+        // Update selected device
         this.selectedDeviceId = deviceId;
-        this.consoleLog(`Selected device ${deviceId}`, 'info');
         
         // Update UI
         const deviceItems = document.querySelectorAll('#device-list li');
         deviceItems.forEach(item => {
             if (item.dataset.deviceId === deviceId) {
-                item.className = 'selected';
+                item.classList.add('selected');
             } else {
-                item.className = '';
+                item.classList.remove('selected');
             }
         });
         
-        // Enable command buttons
-        document.getElementById('command-name').disabled = false;
-        document.getElementById('command-data').disabled = false;
-        document.getElementById('send-command-btn').disabled = false;
+        // Enable commands
+        this.updateCommandControls(true);
+        
+        // Enable video controls
         document.getElementById('start-video-btn').disabled = false;
+        document.getElementById('stop-video-btn').disabled = false;
         
-        // Update video status
-        document.getElementById('video-status').textContent = 'Video not started';
-        
-        // Set default command template
-        this.updateCommandTemplate('get_status');
-
-        // Connect to the device to start receiving telemetry
-        this.connectToDevice(deviceId);
+        this.consoleLog(`Selected device: ${device.name} (${device.id})`, 'info');
     }
     
-    // Connect to the selected device to start receiving telemetry
-    async connectToDevice(deviceId) {
-        if (!this.connected || !deviceId) return;
+    // Send emergency stop command to the boat
+    async sendStopCommand() {
+        if (!this.connected || !this.selectedDeviceId) return;
         
         try {
-            await this.sendJson({
-                type: 'connect_device',
-                deviceId: deviceId
-            });
+            // Increment command counter
+            this.commandCounter++;
             
-            this.consoleLog(`Connecting to device ${deviceId} for telemetry`, 'info');
-            document.getElementById('video-status').textContent = 'Connected (telemetry only)';
+            // Create command object
+            const command = {
+                type: 'command',
+                command: 'stop',
+                deviceId: this.selectedDeviceId,
+                command_id: `${this.clientId}-${this.commandCounter}-${Date.now()}`,
+                data: {}  // Stop command doesn't need additional data
+            };
+            
+            // Send command
+            await this.sendJson(command);
+            this.consoleLog('Sent EMERGENCY STOP command', 'warning');
         } catch (error) {
-            this.consoleLog(`Error connecting to device: ${error.message}`, 'error');
+            this.consoleLog(`Error sending stop command: ${error.message}`, 'error');
         }
     }
     
-    // Update command template based on selected command
-    updateCommandTemplate(commandName) {
-        const templateId = `template-${commandName}`;
-        const template = document.getElementById(templateId);
+    // Send rudder position command to the boat
+    async sendRudderCommand() {
+        if (!this.connected || !this.selectedDeviceId) return;
         
-        if (template) {
-            document.getElementById('command-data').value = template.textContent.trim();
+        try {
+            // Get rudder position value
+            const rudderPosition = parseInt(document.getElementById('rudder-position').value, 10);
+            
+            // Increment command counter
+            this.commandCounter++;
+            
+            // Create command object
+            const command = {
+                type: 'command',
+                command: 'set_rudder',
+                deviceId: this.selectedDeviceId,
+                command_id: `${this.clientId}-${this.commandCounter}-${Date.now()}`,
+                data: {
+                    position: rudderPosition
+                }
+            };
+            
+            // Send command
+            await this.sendJson(command);
+            this.consoleLog(`Sent rudder position command: ${rudderPosition}%`, 'info');
+        } catch (error) {
+            this.consoleLog(`Error sending rudder command: ${error.message}`, 'error');
+        }
+    }
+    
+    // Send throttle command to the boat
+    async sendThrottleCommand() {
+        if (!this.connected || !this.selectedDeviceId) return;
+        
+        try {
+            // Get throttle value
+            const throttleValue = parseInt(document.getElementById('throttle-value').value, 10);
+            
+            // Increment command counter
+            this.commandCounter++;
+            
+            // Create command object
+            const command = {
+                type: 'command',
+                command: 'set_throttle',
+                deviceId: this.selectedDeviceId,
+                command_id: `${this.clientId}-${this.commandCounter}-${Date.now()}`,
+                data: {
+                    throttle: throttleValue
+                }
+            };
+            
+            // Send command
+            await this.sendJson(command);
+            this.consoleLog(`Sent throttle command: ${throttleValue}%`, 'info');
+        } catch (error) {
+            this.consoleLog(`Error sending throttle command: ${error.message}`, 'error');
         }
     }
     
@@ -683,37 +825,6 @@ class PiBoatClient {
             this.consoleLog('Requesting devices list', 'info');
         } catch (error) {
             this.consoleLog(`Error requesting devices list: ${error.message}`, 'error');
-        }
-    }
-    
-    // Send a command to the device
-    async sendCommand() {
-        if (!this.connected || !this.selectedDeviceId) return;
-        
-        const commandName = document.getElementById('command-name').value;
-        const commandDataStr = document.getElementById('command-data').value;
-        
-        try {
-            // Parse command data
-            const commandData = JSON.parse(commandDataStr);
-            
-            // Increment command counter
-            this.commandCounter++;
-            
-            // Create command object
-            const command = {
-                type: 'command',
-                command: commandName,
-                deviceId: this.selectedDeviceId,
-                command_id: `${this.clientId}-${this.commandCounter}-${Date.now()}`,
-                data: commandData
-            };
-            
-            // Send command
-            await this.sendJson(command);
-            this.consoleLog(`Sent command: ${commandName}`, 'info');
-        } catch (error) {
-            this.consoleLog(`Error sending command: ${error.message}`, 'error');
         }
     }
     
